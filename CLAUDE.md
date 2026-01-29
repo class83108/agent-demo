@@ -130,6 +130,14 @@ Feature: 功能名稱
 - **分組功能**: 將驗證同一規則的 Scenario 放在一起
 - 若 Feature 簡單，可省略 Rule 直接寫 Scenario
 
+#### Feature 與測試的對應原則
+- **可測試性優先**: 每個 Scenario 撰寫時，應思考最終如何轉換為測試案例
+- **測試類型限制**: 本專案只使用兩種測試：
+  - **Unit Test**: 針對單一模組/函數的獨立測試，放置於 `tests/test_*.py`
+  - **Smoke Test**: 端對端的冒煙測試，驗證主要流程可運作，放置於 `tests/manual/`
+- **Scenario 對應測試**: 一個 Scenario 應可對應到一個或多個 test case
+- **避免不可測試的 Scenario**: 若 Scenario 描述的行為無法被自動化測試驗證，應重新思考其撰寫方式
+
 #### 範例
 
 ```gherkin
