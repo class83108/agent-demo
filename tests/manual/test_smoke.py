@@ -15,7 +15,7 @@ import pytest
 
 from agent_demo.agent import Agent
 
-pytestmark = pytest.mark.skip(reason='手動執行：uv run pytest tests/manual -v --no-header -rN')
+pytestmark = pytest.mark.smoke
 
 
 class TestSmoke:
