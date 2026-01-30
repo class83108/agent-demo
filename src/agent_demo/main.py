@@ -11,6 +11,7 @@ import os
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
+from pathlib import Path
 from typing import Any
 
 from dotenv import load_dotenv
@@ -21,6 +22,8 @@ from pydantic import BaseModel
 
 from agent_demo.agent import Agent, AgentConfig
 from agent_demo.session import SessionManager
+from agent_demo.tools.registry import ToolRegistry
+from agent_demo.tools.setup import create_default_registry
 
 # 在匯入 Anthropic client 之前加載 .env
 load_dotenv()
@@ -30,17 +33,27 @@ logger = logging.getLogger(__name__)
 # --- 配置 ---
 REDIS_URL = 'redis://localhost:6381'
 STATIC_DIR = 'static'
+SANDBOX_DIR = 'workspace/sandbox'
 IS_PRODUCTION = os.environ.get('ENV') == 'production'
 
-# --- 會話管理器（全局單例）---
+# --- 全局單例 ---
 session_manager = SessionManager(redis_url=REDIS_URL)
+tool_registry: ToolRegistry | None = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """應用程序生命週期管理。"""
+    global tool_registry
+
     logger.info('應用程序啟動')
+
+    # 啟動時建立一次工具註冊表
+    sandbox_root = Path(SANDBOX_DIR)
+    tool_registry = create_default_registry(sandbox_root)
+
     yield
+
     await session_manager.close()
     logger.info('應用程序關閉')
 
@@ -103,8 +116,8 @@ async def _stream_chat(
     # 從 Redis 讀取歷史
     conversation = await session_manager.load(session_id)
 
-    # 建立 Agent（帶入歷史）
-    agent = Agent(config=AgentConfig(), client=None)
+    # 建立 Agent（使用全局工具註冊表，帶入歷史）
+    agent = Agent(config=AgentConfig(), client=None, tool_registry=tool_registry)
     agent.conversation = list(conversation)
 
     try:

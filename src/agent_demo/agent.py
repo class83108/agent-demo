@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
@@ -12,7 +13,9 @@ from typing import Any  # 用於 client 類型
 
 import anthropic
 from anthropic import APIConnectionError, APIStatusError, AuthenticationError
-from anthropic.types import MessageParam
+from anthropic.types import MessageParam, ToolResultBlockParam
+
+from agent_demo.tools.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
 
@@ -37,22 +40,39 @@ class Agent:
     """對話代理。
 
     負責管理與 Claude API 的對話互動，維護對話歷史，
-    並支援串流回應。
+    並支援串流回應。支援工具調用迴圈。
 
     Attributes:
         config: Agent 配置
         client: Anthropic API 客戶端
         conversation: 對話歷史紀錄
+        tool_registry: 工具註冊表（可選）
     """
 
     config: AgentConfig = field(default_factory=AgentConfig)
     client: Any = None  # anthropic.AsyncAnthropic | MagicMock
     conversation: list[MessageParam] = field(default_factory=lambda: [])
+    tool_registry: ToolRegistry | None = None
 
     def __post_init__(self) -> None:
-        """初始化 API 客戶端。"""
+        """初始化 API 客戶端與快取固定參數。"""
         if self.client is None:
             self.client = anthropic.AsyncAnthropic()
+
+        # 快取固定的 API 參數
+        self._base_kwargs: dict[str, Any] = {
+            'model': self.config.model,
+            'max_tokens': self.config.max_tokens,
+            'system': self.config.system_prompt,
+            'timeout': self.config.timeout,
+        }
+
+        # 快取工具定義（如果有）
+        if self.tool_registry:
+            tool_defs = self.tool_registry.get_tool_definitions()
+            if tool_defs:
+                self._base_kwargs['tools'] = tool_defs
+
         logger.info('Agent 已初始化', extra={'model': self.config.model})
 
     def reset_conversation(self) -> None:
@@ -60,11 +80,77 @@ class Agent:
         self.conversation = []
         logger.debug('對話歷史已重設')
 
+    def _build_stream_kwargs(self) -> dict[str, Any]:
+        """建立 messages.stream() 的參數。
+
+        Returns:
+            API 呼叫參數字典
+        """
+        # 複製固定參數 + 加入動態 messages
+        return {
+            **self._base_kwargs,
+            'messages': self.conversation,  # 每次迴圈都會變化
+        }
+
+    async def _execute_tool_calls(
+        self,
+        content_blocks: list[Any],
+    ) -> list[ToolResultBlockParam]:
+        """執行回應中的工具調用。
+
+        Args:
+            content_blocks: Claude 回應的 content blocks
+
+        Returns:
+            tool_result blocks 列表
+        """
+        tool_results: list[ToolResultBlockParam] = []
+
+        for block in content_blocks:
+            if block.type != 'tool_use':
+                continue
+
+            logger.info('執行工具', extra={'tool_name': block.name, 'tool_id': block.id})
+
+            try:
+                assert self.tool_registry is not None
+                result = await self.tool_registry.execute(block.name, block.input)
+                result_content = (
+                    json.dumps(result, ensure_ascii=False)
+                    if isinstance(result, dict)
+                    else str(result)
+                )
+                tool_results.append(
+                    ToolResultBlockParam(
+                        type='tool_result',
+                        tool_use_id=block.id,
+                        content=result_content,
+                    )
+                )
+            except Exception as e:
+                logger.warning(
+                    '工具執行失敗',
+                    extra={'tool_name': block.name, 'error': str(e)},
+                )
+                tool_results.append(
+                    ToolResultBlockParam(
+                        type='tool_result',
+                        tool_use_id=block.id,
+                        content=str(e),
+                        is_error=True,
+                    )
+                )
+
+        return tool_results
+
     async def stream_message(
         self,
         content: str,
     ) -> AsyncIterator[str]:
         """以串流方式發送訊息並逐步取得回應。
+
+        支援工具調用迴圈：當 Claude 回傳 tool_use 時，
+        自動執行工具並將結果回傳，直到取得最終文字回應。
 
         Args:
             content: 使用者訊息內容
@@ -90,21 +176,44 @@ class Agent:
         response_parts: list[str] = []
 
         try:
-            async with self.client.messages.stream(
-                model=self.config.model,
-                max_tokens=self.config.max_tokens,
-                system=self.config.system_prompt,
-                messages=self.conversation,
-                timeout=self.config.timeout,
-            ) as stream:
-                async for text in stream.text_stream:
-                    response_parts.append(text)
-                    yield text
+            while True:
+                kwargs = self._build_stream_kwargs()
 
-            # 串流完成，加入助手回應到對話歷史
-            response_text = ''.join(response_parts)
-            self.conversation.append({'role': 'assistant', 'content': response_text})
-            logger.debug('串流回應完成', extra={'response_length': len(response_text)})
+                async with self.client.messages.stream(**kwargs) as stream:
+                    async for text in stream.text_stream:
+                        response_parts.append(text)
+                        yield text
+
+                    final_message = await stream.get_final_message()
+
+                # 將 assistant 回應加入對話歷史（轉換為可序列化格式）
+                self.conversation.append(
+                    {
+                        'role': 'assistant',
+                        'content': [block.model_dump() for block in final_message.content],
+                    }
+                )
+
+                # 若無工具調用，結束迴圈
+                if final_message.stop_reason != 'tool_use' or not self.tool_registry:
+                    logger.debug(
+                        '串流回應完成',
+                        extra={'response_length': len(''.join(response_parts))},
+                    )
+                    break
+
+                # 執行工���並將結果加入對話歷史
+                tool_results = await self._execute_tool_calls(final_message.content)
+                self.conversation.append(
+                    {
+                        'role': 'user',
+                        'content': tool_results,
+                    }
+                )
+                logger.debug('工具結果已回傳，繼續對話', extra={'tool_count': len(tool_results)})
+
+                # 重置 response_parts 以收集下一輪串流
+                response_parts = []
 
         except AuthenticationError as e:
             self.conversation.pop()
