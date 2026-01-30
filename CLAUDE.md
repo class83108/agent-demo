@@ -223,6 +223,62 @@ uv run <command>
 
 ---
 
+## 常用指令
+
+### 啟動應用程式
+
+```bash
+# 啟動開發伺服器（自動重載）
+uv run uvicorn agent_demo.main:app --reload
+
+# 啟動並指定 port
+uv run uvicorn agent_demo.main:app --reload --port 8000
+```
+
+### 執行測試
+
+```bash
+# 執行所有 unit tests
+uv run pytest
+
+# 執行特定測試檔案
+uv run pytest tests/test_api.py
+
+# 執行特定測試類別或方法
+uv run pytest tests/test_api.py::TestChatHistory -v
+
+# 顯示測試覆蓋率
+uv run pytest --cov
+```
+
+### 執行 Smoke Test
+
+```bash
+# 執行所有 smoke tests（需要 ANTHROPIC_API_KEY 和 --run-smoke 參數）
+export ANTHROPIC_API_KEY=your_api_key_here
+uv run pytest tests/manual --run-smoke -v
+```
+
+**注意：** Smoke test 會呼叫真實的 Claude API 並產生費用，執行前必須設定環境變數並加上 `--run-smoke` 參數。
+
+### 型別檢查與程式碼品質
+
+```bash
+# 型別檢查
+uv run pyright
+
+# Linting 檢查
+uv run ruff check .
+
+# 自動修復
+uv run ruff check . --fix
+
+# 格式化程式碼
+uv run ruff format .
+```
+
+---
+
 ## Git 規範
 
 ### Commit Message

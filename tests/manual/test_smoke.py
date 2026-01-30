@@ -6,7 +6,9 @@
 - 不應該在 CI 中自動執行
 
 執行方式：
-    uv run pytest tests/manual -v
+    uv run pytest tests/manual --run-smoke -v
+
+註：必須加上 --run-smoke 參數才會執行，否則會被自動跳過
 """
 
 from __future__ import annotations

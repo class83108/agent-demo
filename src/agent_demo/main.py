@@ -87,12 +87,12 @@ def _get_or_create_session_id(session_id: str | None) -> tuple[str, bool]:
 
 
 # --- SSE 事件格式化 ---
-def _sse_event(event: str, data: str) -> str:
+def _sse_event(event: str, data: Any) -> str:
     """格式化 SSE 事件。
 
     Args:
         event: 事件類型
-        data: 事件數據
+        data: 事件數據（會自動 JSON 序列化）
 
     Returns:
         SSE 格式的字串
@@ -133,7 +133,7 @@ async def _stream_chat(
 
     except (ValueError, ConnectionError, PermissionError, TimeoutError, RuntimeError) as e:
         # 錯誤時傳出 SSE error 事件
-        error_data = json.dumps({'type': type(e).__name__, 'message': str(e)}, ensure_ascii=False)
+        error_data = {'type': type(e).__name__, 'message': str(e)}
         yield _sse_event('error', error_data)
 
 
@@ -155,24 +155,67 @@ async def chat_stream(
     body: dict[str, Any] = await request.json()
     chat_req = ChatRequest(**body)
 
-    sid, is_new = _get_or_create_session_id(session_id)
+    sid, _ = _get_or_create_session_id(session_id)
 
     response = StreamingResponse(
         _stream_chat(chat_req.message, sid),
         media_type='text/event-stream',
     )
 
-    # 若為新會話，設定 Cookie
-    if is_new:
-        response.set_cookie(
-            key='session_id',
-            value=sid,
-            httponly=True,
-            samesite='lax',
-            secure=IS_PRODUCTION,
-        )
+    # 設定 Cookie（每次都設定，確保過期時間更新）
+    response.set_cookie(
+        key='session_id',
+        value=sid,
+        path='/',  # 明確指定根路徑
+        httponly=True,
+        samesite='lax',
+        secure=IS_PRODUCTION,
+        max_age=86400,  # 24 小時，與 Redis SESSION_TTL 一致
+    )
 
     return response
+
+
+@app.get('/api/chat/history')
+async def chat_history(
+    session_id: str | None = Cookie(default=None),
+) -> JSONResponse:
+    """取得會話歷史端點。
+
+    Args:
+        session_id: 會話 Cookie
+
+    Returns:
+        對話歷史列表
+    """
+    if not session_id:
+        return JSONResponse({'messages': []})
+
+    conversation = await session_manager.load(session_id)
+
+    # 將 MessageParam 轉換為前端友善的格式
+    messages: list[dict[str, str]] = []
+    for msg in conversation:
+        role = msg.get('role', '')
+        content = msg.get('content', '')
+
+        if isinstance(content, str):
+            # content 是字串，直接使用
+            messages.append({'role': role, 'content': content})
+        elif isinstance(content, list):
+            # content 是 list（包含 tool_use 等），提取 text 部分
+            text_parts: list[str] = []
+            for block in content:
+                if isinstance(block, dict) and block.get('type') == 'text':
+                    text = block.get('text', '')
+                    if isinstance(text, str):
+                        text_parts.append(text)
+
+            if text_parts:
+                messages.append({'role': role, 'content': ''.join(text_parts)})
+
+    logger.debug('取得會話歷史', extra={'session_id': session_id, 'messages': len(messages)})
+    return JSONResponse({'messages': messages})
 
 
 @app.post('/api/chat/reset')

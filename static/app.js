@@ -1,6 +1,7 @@
 // === API URLs ===
 const STREAM_URL = '/api/chat/stream';
 const RESET_URL = '/api/chat/reset';
+const HISTORY_URL = '/api/chat/history';
 const FILES_TREE_URL = '/api/files/tree';
 const FILES_CONTENT_URL = '/api/files/content';
 const FILES_MODIFIED_URL = '/api/files/modified';
@@ -10,6 +11,7 @@ const messagesEl = document.getElementById('messages');
 const inputEl = document.getElementById('message-input');
 const sendBtn = document.getElementById('send-btn');
 const resetBtn = document.getElementById('reset-btn');
+const loadHistoryBtn = document.getElementById('load-history-btn');
 
 // === 檔案瀏覽 DOM 元素 ===
 const togglePanelBtn = document.getElementById('toggle-panel-btn');
@@ -26,16 +28,93 @@ let isSending = false;
 let modifiedFiles = new Set();
 let isPanelVisible = false;
 let isComposing = false; // 追蹤輸入法組字狀態
+let isHistoryLoaded = false; // 追蹤歷史是否已載入
 
 // === 初始化檢查 ===
 window.addEventListener('DOMContentLoaded', () => {
   console.log('Marked 載入狀態:', typeof marked !== 'undefined' ? '已載入' : '未載入');
   console.log('Highlight.js 載入狀態:', typeof hljs !== 'undefined' ? '已載入' : '未載入');
+
+  // 自動載入聊天歷史
+  loadChatHistory();
 });
 
 // ===========================================
 // 聊天功能
 // ===========================================
+
+/**
+ * 更新載入歷史按鈕的狀態
+ */
+function updateLoadHistoryButton() {
+  if (isHistoryLoaded) {
+    loadHistoryBtn.disabled = true;
+    loadHistoryBtn.textContent = '已載入歷史';
+  } else {
+    loadHistoryBtn.disabled = false;
+    loadHistoryBtn.textContent = '載入歷史';
+  }
+}
+
+/**
+ * 載入聊天歷史
+ *
+ * 注意：不檢查 cookie，因為 httponly cookie 無法被 JavaScript 讀取。
+ * 直接呼叫 API，後端會自動從 cookie 讀取 session_id。
+ */
+async function loadChatHistory() {
+  if (isHistoryLoaded) {
+    console.log('歷史已載入，跳過重複載入');
+    return;
+  }
+
+  // 設定載入中狀態
+  loadHistoryBtn.disabled = true;
+  loadHistoryBtn.textContent = '載入中...';
+
+  try {
+    const response = await fetch(HISTORY_URL);
+    if (!response.ok) {
+      console.error('載入歷史失敗:', response.status);
+      loadHistoryBtn.textContent = '載入失敗';
+      setTimeout(updateLoadHistoryButton, 2000);
+      return;
+    }
+
+    const data = await response.json();
+    const messages = data.messages || [];
+
+    console.log('載入歷史訊息:', messages.length, '則');
+
+    if (messages.length === 0) {
+      console.log('無歷史訊息（可能是新使用者或已清除歷史）');
+      loadHistoryBtn.textContent = '無歷史記錄';
+      isHistoryLoaded = true;
+      return;
+    }
+
+    // 顯示歷史訊息
+    messages.forEach((msg) => {
+      const bubble = createBubble(msg.role, '');
+
+      if (msg.role === 'assistant') {
+        // Assistant 訊息需要渲染 Markdown
+        const html = renderMarkdown(msg.content);
+        bubble.innerHTML = html;
+      } else {
+        // User 訊息直接顯示文字
+        bubble.textContent = msg.content;
+      }
+    });
+
+    isHistoryLoaded = true;
+    updateLoadHistoryButton();
+  } catch (err) {
+    console.error('載入聊天歷史錯誤:', err);
+    loadHistoryBtn.textContent = '載入失敗';
+    setTimeout(updateLoadHistoryButton, 2000);
+  }
+}
 
 function setDisabled(disabled) {
   isSending = disabled;
@@ -416,10 +495,14 @@ inputEl.addEventListener('keydown', (e) => {
   }
 });
 
+loadHistoryBtn.addEventListener('click', loadChatHistory);
+
 resetBtn.addEventListener('click', async () => {
   try {
     await fetch(RESET_URL, { method: 'POST' });
     messagesEl.innerHTML = '';
+    isHistoryLoaded = false;
+    updateLoadHistoryButton();
   } catch {
     createBubble('error', '清除歷史失敗，請稍後重試。');
   }

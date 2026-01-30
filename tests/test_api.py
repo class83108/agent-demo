@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import AsyncIterator
+from typing import Any
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -18,21 +19,22 @@ from agent_demo.main import app
 # --- 測試用常數 ---
 STREAM_URL = '/api/chat/stream'
 RESET_URL = '/api/chat/reset'
+HISTORY_URL = '/api/chat/history'
 SESSION_COOKIE = {'session_id': 'test-session-abc'}
 
 
 # --- 辅助函數 ---
-def parse_sse(text: str) -> list[dict[str, str]]:
+def parse_sse(text: str) -> list[dict[str, Any]]:
     """解析 SSE 回應文本為事件列表。
 
     Args:
         text: 原始 SSE 文本
 
     Returns:
-        事件字典列表，每個包含 type 和 data
+        事件字典列表，每個包含 type (str) 和 data (Any, 已 JSON 解析)
     """
-    events: list[dict[str, str]] = []
-    current: dict[str, str] = {}
+    events: list[dict[str, Any]] = []
+    current: dict[str, Any] = {}
 
     for line in text.split('\n'):
         if line.startswith('event:'):
@@ -41,7 +43,12 @@ def parse_sse(text: str) -> list[dict[str, str]]:
             current['type'] = value[1:] if value.startswith(' ') else value
         elif line.startswith('data:'):
             value = line.split(':', 1)[1]
-            current['data'] = value[1:] if value.startswith(' ') else value
+            raw_data = value[1:] if value.startswith(' ') else value
+            # 對 data 進行 JSON 解析
+            try:
+                current['data'] = json.loads(raw_data)
+            except json.JSONDecodeError:
+                current['data'] = raw_data
         elif line == '' and current:
             events.append(current)
             current = {}
@@ -136,7 +143,7 @@ class TestSSEStreaming:
         error_events = [e for e in events if e['type'] == 'error']
 
         assert len(error_events) == 1
-        error = json.loads(error_events[0]['data'])
+        error = error_events[0]['data']
         assert error['type'] == 'ValueError'
 
     @pytest.mark.asyncio
@@ -170,7 +177,7 @@ class TestSSEStreaming:
         error_events = [e for e in events if e['type'] == 'error']
 
         assert len(error_events) == 1
-        error = json.loads(error_events[0]['data'])
+        error = error_events[0]['data']
         assert error['type'] == 'ConnectionError'
         assert '連線' in error['message']
 
@@ -208,8 +215,8 @@ class TestSessionCookie:
         assert 'session_id' in response.cookies
 
     @pytest.mark.asyncio
-    async def test_existing_session_does_not_reset_cookie(self) -> None:
-        """既有會話不重複設定 Cookie。"""
+    async def test_existing_session_updates_cookie_expiry(self) -> None:
+        """既有會話應更新 Cookie 過期時間。"""
         mock_session = _make_mock_session_manager()
 
         with (
@@ -234,8 +241,9 @@ class TestSessionCookie:
                     cookies=SESSION_COOKIE,
                 )
 
-        # 不應重新設定 Cookie
-        assert 'session_id' not in response.cookies
+        # 應更新 Cookie（包含相同的 session_id）
+        assert 'session_id' in response.cookies
+        assert response.cookies['session_id'] == 'test-session-abc'
 
 
 class TestSessionHistory:
@@ -300,3 +308,78 @@ class TestSessionHistory:
 
         assert response.status_code == 200
         mock_session.reset.assert_called_once_with('test-session-abc')
+
+
+class TestChatHistory:
+    """測試會話歷史讀取 — 對應 Rule: 會話歷史應可透過 API 讀取"""
+
+    @pytest.mark.asyncio
+    async def test_get_existing_session_history(self) -> None:
+        """取得現有會話的歷史記錄。"""
+        # 模擬 Redis 已有兩組對話
+        existing_history = [
+            {'role': 'user', 'content': '第一問'},
+            {'role': 'assistant', 'content': '第一答'},
+            {'role': 'user', 'content': '第二問'},
+            {'role': 'assistant', 'content': '第二答'},
+        ]
+        mock_session = _make_mock_session_manager()
+        mock_session.load = AsyncMock(return_value=existing_history)
+
+        with patch('agent_demo.main.session_manager', mock_session):
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url='http://test'
+            ) as client:
+                response = await client.get(
+                    HISTORY_URL,
+                    cookies=SESSION_COOKIE,
+                )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert 'messages' in data
+        messages = data['messages']
+        assert len(messages) == 4
+        assert messages[0]['role'] == 'user'
+        assert messages[0]['content'] == '第一問'
+        assert messages[1]['role'] == 'assistant'
+        assert messages[1]['content'] == '第一答'
+
+    @pytest.mark.asyncio
+    async def test_get_empty_session_history(self) -> None:
+        """取得空會話的歷史記錄。"""
+        mock_session = _make_mock_session_manager()
+        mock_session.load = AsyncMock(return_value=[])
+
+        with patch('agent_demo.main.session_manager', mock_session):
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url='http://test'
+            ) as client:
+                response = await client.get(
+                    HISTORY_URL,
+                    cookies=SESSION_COOKIE,
+                )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert 'messages' in data
+        assert data['messages'] == []
+
+    @pytest.mark.asyncio
+    async def test_get_history_without_session(self) -> None:
+        """無會話時取得歷史記錄。"""
+        mock_session = _make_mock_session_manager()
+
+        with patch('agent_demo.main.session_manager', mock_session):
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url='http://test'
+            ) as client:
+                # 不帶 Cookie
+                response = await client.get(HISTORY_URL)
+
+        assert response.status_code == 200
+        data = response.json()
+        assert 'messages' in data
+        assert data['messages'] == []
+        # 確認未嘗試載入會話（因為沒有 session_id）
+        mock_session.load.assert_not_called()
