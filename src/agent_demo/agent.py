@@ -143,6 +143,121 @@ class Agent:
 
         return tool_results
 
+    def _handle_stream_error(
+        self,
+        error: Exception,
+        response_parts: list[str],
+    ) -> None:
+        """處理串流錯誤並管理對話歷史。
+
+        Args:
+            error: API 錯誤
+            response_parts: 已收到的回應片段
+
+        Raises:
+            PermissionError: API 認證失敗
+            TimeoutError: API 回應超時
+            ConnectionError: API 連線失敗
+            RuntimeError: 其他 API 錯誤
+        """
+        # 處理認證錯誤
+        if isinstance(error, AuthenticationError):
+            self.conversation.pop()
+            logger.error('API 認證失敗', extra={'error': str(error)})
+            raise PermissionError(
+                'API 金鑰無效或已過期。請檢查 ANTHROPIC_API_KEY 環境變數是否正確設定。'
+            ) from error
+
+        # 處理超時錯誤（必須在 APIConnectionError 之前檢查）
+        if isinstance(error, anthropic.APITimeoutError):
+            if response_parts:
+                partial = ''.join(response_parts)
+                self.conversation.append({'role': 'assistant', 'content': partial})
+                logger.warning('串流超時，已保留部分回應', extra={'partial_length': len(partial)})
+            else:
+                self.conversation.pop()
+            logger.error('API 回應超時', extra={'error': str(error)})
+            raise TimeoutError('串流回應超時。') from error
+
+        # 處理連線錯誤
+        if isinstance(error, APIConnectionError):
+            if response_parts:
+                partial = ''.join(response_parts)
+                self.conversation.append({'role': 'assistant', 'content': partial})
+                logger.warning('串流中斷，已保留部分回應', extra={'partial_length': len(partial)})
+            else:
+                self.conversation.pop()
+            logger.error('API 連線失敗', extra={'error': str(error)})
+            raise ConnectionError('串流連線中斷，請檢查網路連線並稍後重試。') from error
+
+        # 處理其他 API 狀態錯誤
+        if isinstance(error, APIStatusError):
+            self.conversation.pop()
+            logger.error('API 錯誤', extra={'status_code': error.status_code, 'error': str(error)})
+            raise RuntimeError(f'API 錯誤 ({error.status_code}): {error.message}') from error
+
+    async def _stream_with_tool_loop(
+        self,
+    ) -> AsyncIterator[str]:
+        """執行串流迴圈，支援工具調用。
+
+        Yields:
+            回應的每個 token
+
+        Raises:
+            各種 API 錯誤（由 _handle_stream_error 處理）
+        """
+        response_parts: list[str] = []
+
+        try:
+            while True:
+                kwargs = self._build_stream_kwargs()
+
+                async with self.client.messages.stream(**kwargs) as stream:
+                    async for text in stream.text_stream:
+                        response_parts.append(text)
+                        yield text
+
+                    final_message = await stream.get_final_message()
+
+                # 將 assistant 回應加入對話歷史（轉換為可序列化格式）
+                self.conversation.append(
+                    {
+                        'role': 'assistant',
+                        'content': [block.model_dump() for block in final_message.content],
+                    }
+                )
+
+                # 若無工具調用，結束迴圈
+                if final_message.stop_reason != 'tool_use' or not self.tool_registry:
+                    logger.debug(
+                        '串流回應完成',
+                        extra={'response_length': len(''.join(response_parts))},
+                    )
+                    break
+
+                # 執行工具並將結果加入對話歷史
+                tool_results = await self._execute_tool_calls(final_message.content)
+                self.conversation.append(
+                    {
+                        'role': 'user',
+                        'content': tool_results,
+                    }
+                )
+                logger.debug('工具結果已回傳，繼續對話', extra={'tool_count': len(tool_results)})
+
+                # 重置 response_parts 以收集下一輪串流
+                response_parts = []
+
+        except (
+            AuthenticationError,
+            anthropic.APITimeoutError,
+            APIConnectionError,
+            APIStatusError,
+        ) as e:
+            self._handle_stream_error(e, response_parts)
+            raise  # 重新拋出已轉換的例外
+
     async def stream_message(
         self,
         content: str,
@@ -173,81 +288,6 @@ class Agent:
         self.conversation.append({'role': 'user', 'content': content})
         logger.debug('收到使用者訊息 (串流模式)', extra={'content_length': len(content)})
 
-        response_parts: list[str] = []
-
-        try:
-            while True:
-                kwargs = self._build_stream_kwargs()
-
-                async with self.client.messages.stream(**kwargs) as stream:
-                    async for text in stream.text_stream:
-                        response_parts.append(text)
-                        yield text
-
-                    final_message = await stream.get_final_message()
-
-                # 將 assistant 回應加入對話歷史（轉換為可序列化格式）
-                self.conversation.append(
-                    {
-                        'role': 'assistant',
-                        'content': [block.model_dump() for block in final_message.content],
-                    }
-                )
-
-                # 若無工具調用，結束迴圈
-                if final_message.stop_reason != 'tool_use' or not self.tool_registry:
-                    logger.debug(
-                        '串流回應完成',
-                        extra={'response_length': len(''.join(response_parts))},
-                    )
-                    break
-
-                # 執行工���並將結果加入對話歷史
-                tool_results = await self._execute_tool_calls(final_message.content)
-                self.conversation.append(
-                    {
-                        'role': 'user',
-                        'content': tool_results,
-                    }
-                )
-                logger.debug('工具結果已回傳，繼續對話', extra={'tool_count': len(tool_results)})
-
-                # 重置 response_parts 以收集下一輪串流
-                response_parts = []
-
-        except AuthenticationError as e:
-            self.conversation.pop()
-            logger.error('API 認證失敗', extra={'error': str(e)})
-            raise PermissionError(
-                'API 金鑰無效或已過期。請檢查 ANTHROPIC_API_KEY 環境變數是否正確設定。'
-            ) from e
-
-        except anthropic.APITimeoutError as e:
-            # 注意：APITimeoutError 繼承自 APIConnectionError，必須先捕獲
-            if response_parts:
-                # 有部分回應，保留 user 訊息並加入部分 assistant 回應
-                partial = ''.join(response_parts)
-                self.conversation.append({'role': 'assistant', 'content': partial})
-                logger.warning('串流超時，已保留部分回應', extra={'partial_length': len(partial)})
-            else:
-                # 沒有回應，移除 user 訊息
-                self.conversation.pop()
-            logger.error('API 回應超時', extra={'error': str(e)})
-            raise TimeoutError('串流回應超時。') from e
-
-        except APIConnectionError as e:
-            # 如果已有部分回應，保留 user 訊息並加入部分 assistant 回應
-            if response_parts:
-                partial = ''.join(response_parts)
-                self.conversation.append({'role': 'assistant', 'content': partial})
-                logger.warning('串流中斷，已保留部分回應', extra={'partial_length': len(partial)})
-            else:
-                # 沒有回應，移除 user 訊息
-                self.conversation.pop()
-            logger.error('API 連線失敗', extra={'error': str(e)})
-            raise ConnectionError('串流連線中斷，請檢查網路連線並稍後重試。') from e
-
-        except APIStatusError as e:
-            self.conversation.pop()
-            logger.error('API 錯誤', extra={'status_code': e.status_code, 'error': str(e)})
-            raise RuntimeError(f'API 錯誤 ({e.status_code}): {e.message}') from e
+        # 執行串流迴圈（包含工具調用處理）
+        async for token in self._stream_with_tool_loop():
+            yield token

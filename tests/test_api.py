@@ -383,3 +383,179 @@ class TestChatHistory:
         assert data['messages'] == []
         # 確認未嘗試載入會話（因為沒有 session_id）
         mock_session.load.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_get_history_with_text_blocks(self) -> None:
+        """取得包含 text blocks 的歷史記錄。"""
+        # 模擬 content 是 list，包含 text blocks（來自 tool_use 迴圈）
+        existing_history = [
+            {'role': 'user', 'content': '請讀取檔案'},
+            {
+                'role': 'assistant',
+                'content': [
+                    {'type': 'text', 'text': '好的，讓我讀取檔案內容'},
+                    {
+                        'type': 'tool_use',
+                        'id': 'tool_1',
+                        'name': 'read_file',
+                        'input': {'path': 'main.py'},
+                    },
+                ],
+            },
+        ]
+        mock_session = _make_mock_session_manager()
+        mock_session.load = AsyncMock(return_value=existing_history)
+
+        with patch('agent_demo.main.session_manager', mock_session):
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url='http://test'
+            ) as client:
+                response = await client.get(
+                    HISTORY_URL,
+                    cookies=SESSION_COOKIE,
+                )
+
+        assert response.status_code == 200
+        data = response.json()
+        messages = data['messages']
+
+        # 應該只提取 text 部分，過濾掉 tool_use
+        assert len(messages) == 2
+        assert messages[0]['role'] == 'user'
+        assert messages[0]['content'] == '請讀取檔案'
+        assert messages[1]['role'] == 'assistant'
+        assert messages[1]['content'] == '好的，讓我讀取檔案內容'
+
+    @pytest.mark.asyncio
+    async def test_get_history_with_multiple_text_blocks(self) -> None:
+        """取得包含多個 text blocks 的歷史記錄（應合併）。"""
+        existing_history = [
+            {
+                'role': 'assistant',
+                'content': [
+                    {'type': 'text', 'text': '第一段文字'},
+                    {'type': 'text', 'text': '第二段文字'},
+                    {'type': 'text', 'text': '第三段文字'},
+                ],
+            },
+        ]
+        mock_session = _make_mock_session_manager()
+        mock_session.load = AsyncMock(return_value=existing_history)
+
+        with patch('agent_demo.main.session_manager', mock_session):
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url='http://test'
+            ) as client:
+                response = await client.get(
+                    HISTORY_URL,
+                    cookies=SESSION_COOKIE,
+                )
+
+        assert response.status_code == 200
+        data = response.json()
+        messages = data['messages']
+
+        # 多個 text blocks 應該合併為一個 message
+        assert len(messages) == 1
+        assert messages[0]['content'] == '第一段文字第二段文字第三段文字'
+
+    @pytest.mark.asyncio
+    async def test_get_history_with_only_tool_use_blocks(self) -> None:
+        """取得只包含 tool_use blocks 的歷史記錄（應被過濾）。"""
+        existing_history = [
+            {'role': 'user', 'content': '請執行工具'},
+            {
+                'role': 'assistant',
+                'content': [
+                    {
+                        'type': 'tool_use',
+                        'id': 'tool_1',
+                        'name': 'read_file',
+                        'input': {'path': 'main.py'},
+                    },
+                ],
+            },
+            {
+                'role': 'user',
+                'content': [
+                    {'type': 'tool_result', 'tool_use_id': 'tool_1', 'content': 'file content'},
+                ],
+            },
+        ]
+        mock_session = _make_mock_session_manager()
+        mock_session.load = AsyncMock(return_value=existing_history)
+
+        with patch('agent_demo.main.session_manager', mock_session):
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url='http://test'
+            ) as client:
+                response = await client.get(
+                    HISTORY_URL,
+                    cookies=SESSION_COOKIE,
+                )
+
+        assert response.status_code == 200
+        data = response.json()
+        messages = data['messages']
+
+        # 只有包含 text 的 message 應該被保留
+        # assistant 的 tool_use 和 user 的 tool_result 都應該被過濾
+        assert len(messages) == 1
+        assert messages[0]['role'] == 'user'
+        assert messages[0]['content'] == '請執行工具'
+
+    @pytest.mark.asyncio
+    async def test_get_history_with_mixed_blocks(self) -> None:
+        """取得包含混合 text 和 tool_use blocks 的歷史記錄。"""
+        existing_history = [
+            {'role': 'user', 'content': '分析這個檔案'},
+            {
+                'role': 'assistant',
+                'content': [
+                    {'type': 'text', 'text': '讓我先讀取檔案'},
+                    {
+                        'type': 'tool_use',
+                        'id': 'tool_1',
+                        'name': 'read_file',
+                        'input': {'path': 'test.py'},
+                    },
+                ],
+            },
+            {
+                'role': 'user',
+                'content': [
+                    {'type': 'tool_result', 'tool_use_id': 'tool_1', 'content': 'def test(): pass'},
+                ],
+            },
+            {
+                'role': 'assistant',
+                'content': [
+                    {'type': 'text', 'text': '這個檔案包含一個'},
+                    {'type': 'text', 'text': 'test 函數'},
+                ],
+            },
+        ]
+        mock_session = _make_mock_session_manager()
+        mock_session.load = AsyncMock(return_value=existing_history)
+
+        with patch('agent_demo.main.session_manager', mock_session):
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url='http://test'
+            ) as client:
+                response = await client.get(
+                    HISTORY_URL,
+                    cookies=SESSION_COOKIE,
+                )
+
+        assert response.status_code == 200
+        data = response.json()
+        messages = data['messages']
+
+        # 應該只保留有 text 的 messages，並合併多個 text blocks
+        assert len(messages) == 3
+        assert messages[0]['role'] == 'user'
+        assert messages[0]['content'] == '分析這個檔案'
+        assert messages[1]['role'] == 'assistant'
+        assert messages[1]['content'] == '讓我先讀取檔案'
+        assert messages[2]['role'] == 'assistant'
+        assert messages[2]['content'] == '這個檔案包含一個test 函數'

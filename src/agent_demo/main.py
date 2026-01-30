@@ -12,7 +12,7 @@ import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from dotenv import load_dotenv
 from fastapi import Cookie, FastAPI, Request
@@ -25,6 +25,7 @@ from agent_demo.session import SessionManager
 from agent_demo.tools.file_read import detect_language, read_file_handler
 from agent_demo.tools.registry import ToolRegistry
 from agent_demo.tools.setup import create_default_registry
+from agent_demo.types import ContentBlock
 
 # 在匯入 Anthropic client 之前加載 .env
 load_dotenv()
@@ -67,6 +68,62 @@ class ChatRequest(BaseModel):
     """聊天請求本體。"""
 
     message: str
+
+
+# --- 輔助函數 ---
+def _extract_text_from_content(content: Any) -> str | None:
+    """從 content 中提取文字內容。
+
+    Args:
+        content: MessageParam 中的 content（可能是字串或 blocks 列表）
+
+    Returns:
+        提取的文字內容，若無文字則返回 None
+    """
+    if isinstance(content, str):
+        return content
+
+    if isinstance(content, list):
+        text_parts: list[str] = []
+        # 使用 cast 告訴型別檢查器這是 dict 列表
+        blocks = cast(list[dict[str, Any]], content)
+        for item in blocks:
+            # 檢查是否包含 type='text'
+            if item.get('type') != 'text':
+                continue
+            # 轉換為 ContentBlock 以獲得更精確的型別提示
+            block = cast(ContentBlock, item)
+            text = block.get('text', '')
+            if text:
+                text_parts.append(text)
+        if text_parts:
+            return ''.join(text_parts)
+
+    return None
+
+
+def _convert_to_frontend_messages(
+    conversation: list[Any],
+) -> list[dict[str, str]]:
+    """將 MessageParam 格式轉換為前端友善的格式。
+
+    Args:
+        conversation: MessageParam 列表
+
+    Returns:
+        前端訊息列表，每個包含 role 和 content
+    """
+    messages: list[dict[str, str]] = []
+
+    for msg in conversation:
+        role = msg.get('role', '')
+        content = msg.get('content', '')
+
+        text_content = _extract_text_from_content(content)
+        if text_content is not None:
+            messages.append({'role': role, 'content': text_content})
+
+    return messages
 
 
 # --- 生成會話 ID ---
@@ -194,25 +251,7 @@ async def chat_history(
     conversation = await session_manager.load(session_id)
 
     # 將 MessageParam 轉換為前端友善的格式
-    messages: list[dict[str, str]] = []
-    for msg in conversation:
-        role = msg.get('role', '')
-        content = msg.get('content', '')
-
-        if isinstance(content, str):
-            # content 是字串，直接使用
-            messages.append({'role': role, 'content': content})
-        elif isinstance(content, list):
-            # content 是 list（包含 tool_use 等），提取 text 部分
-            text_parts: list[str] = []
-            for block in content:
-                if isinstance(block, dict) and block.get('type') == 'text':
-                    text = block.get('text', '')
-                    if isinstance(text, str):
-                        text_parts.append(text)
-
-            if text_parts:
-                messages.append({'role': role, 'content': ''.join(text_parts)})
+    messages = _convert_to_frontend_messages(conversation)
 
     logger.debug('取得會話歷史', extra={'session_id': session_id, 'messages': len(messages)})
     return JSONResponse({'messages': messages})
