@@ -3,27 +3,55 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Agent 聊天</title>
+  <title>Agent Demo</title>
   <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/styles/github.min.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/highlight.js/11.9.0/highlight.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/marked@4.3.0/marked.min.js"></script>
 </head>
 <body>
-  <div class="container">
+  <div class="app-container">
     <header>
-      <h1>Agent 聊天</h1>
-      <button id="reset-btn" class="btn-reset">清除歷史</button>
+      <h1>Agent Demo</h1>
+      <div class="header-actions">
+        <button id="toggle-panel-btn" class="btn-toggle">顯示檔案</button>
+        <button id="reset-btn" class="btn-reset">清除歷史</button>
+      </div>
     </header>
 
-    <div id="messages" class="messages"></div>
+    <main class="main-content">
+      <!-- 檔案瀏覽面板 -->
+      <aside id="file-panel" class="file-panel hidden">
+        <div class="panel-header">
+          <span>檔案瀏覽</span>
+          <button id="refresh-tree-btn" class="btn-icon" title="重新整理">&#x21bb;</button>
+        </div>
+        <div id="file-tree" class="file-tree"></div>
+      </aside>
 
-    <footer class="input-area">
-      <textarea
-        id="message-input"
-        placeholder="輸入訊息..."
-        rows="2"
-        autofocus
-      ></textarea>
-      <button id="send-btn" class="btn-send">發送</button>
-    </footer>
+      <!-- 聊天區域 -->
+      <div class="chat-container">
+        <div id="messages" class="messages"></div>
+        <footer class="input-area">
+          <textarea
+            id="message-input"
+            placeholder="輸入訊息..."
+            rows="2"
+            autofocus
+          ></textarea>
+          <button id="send-btn" class="btn-send">發送</button>
+        </footer>
+      </div>
+
+      <!-- 檔案預覽面板 -->
+      <aside id="preview-panel" class="preview-panel hidden">
+        <div class="panel-header">
+          <span id="preview-filename">檔案預覽</span>
+          <button id="close-preview-btn" class="btn-icon" title="關閉">&times;</button>
+        </div>
+        <pre class="preview-content"><code id="preview-content"></code></pre>
+      </aside>
+    </main>
   </div>
 
   <script src="app.js"></script>

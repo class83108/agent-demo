@@ -22,6 +22,7 @@ from pydantic import BaseModel
 
 from agent_demo.agent import Agent, AgentConfig
 from agent_demo.session import SessionManager
+from agent_demo.tools.file_read import detect_language, read_file_handler
 from agent_demo.tools.registry import ToolRegistry
 from agent_demo.tools.setup import create_default_registry
 
@@ -96,7 +97,9 @@ def _sse_event(event: str, data: str) -> str:
     Returns:
         SSE 格式的字串
     """
-    return f'event: {event}\ndata: {data}\n\n'
+    # 用 JSON 編碼確保換行符等特殊字元被正確傳輸
+    encoded_data = json.dumps(data, ensure_ascii=False)
+    return f'event: {event}\ndata: {encoded_data}\n\n'
 
 
 # --- 串流生成器 ---
@@ -196,6 +199,114 @@ async def chat_reset(
 async def health() -> JSONResponse:
     """健康檢查端點。"""
     return JSONResponse({'status': 'healthy'})
+
+
+# --- 檔案瀏覽 API ---
+def _build_tree(current_path: Path, sandbox_root: Path) -> list[dict[str, Any]]:
+    """遞迴建立目錄樹結構。
+
+    Args:
+        current_path: 當前遍歷的路徑
+        sandbox_root: sandbox 根目錄
+
+    Returns:
+        目錄樹結構列表
+    """
+    items: list[dict[str, Any]] = []
+
+    # 跳過的目錄名稱
+    skip_dirs = {'__pycache__', 'node_modules', '.git', '.venv', 'venv'}
+
+    try:
+        for entry in sorted(current_path.iterdir(), key=lambda e: (not e.is_dir(), e.name)):
+            # 跳過隱藏檔案和特定目錄
+            if entry.name.startswith('.') or entry.name in skip_dirs:
+                continue
+
+            relative_path = str(entry.relative_to(sandbox_root))
+
+            if entry.is_dir():
+                items.append(
+                    {
+                        'name': entry.name,
+                        'type': 'directory',
+                        'path': relative_path,
+                        'children': _build_tree(entry, sandbox_root),
+                    }
+                )
+            else:
+                items.append(
+                    {
+                        'name': entry.name,
+                        'type': 'file',
+                        'path': relative_path,
+                        'language': detect_language(entry),
+                    }
+                )
+    except PermissionError:
+        logger.warning('無權限存取目錄', extra={'path': str(current_path)})
+
+    return items
+
+
+@app.get('/api/files/tree')
+async def get_file_tree() -> JSONResponse:
+    """取得 sandbox 目錄結構。
+
+    Returns:
+        包含目錄樹的 JSON 回應
+    """
+    sandbox_path = Path(SANDBOX_DIR).resolve()
+
+    if not sandbox_path.exists():
+        logger.warning('Sandbox 目錄不存在', extra={'path': SANDBOX_DIR})
+        return JSONResponse({'root': SANDBOX_DIR, 'tree': []})
+
+    tree = _build_tree(sandbox_path, sandbox_path)
+    return JSONResponse({'root': SANDBOX_DIR, 'tree': tree})
+
+
+@app.get('/api/files/content')
+async def get_file_content(path: str) -> JSONResponse:
+    """讀取檔案內容。
+
+    Args:
+        path: 檔案路徑（相對於 sandbox）
+
+    Returns:
+        包含檔案內容的 JSON 回應
+    """
+    sandbox_root = Path(SANDBOX_DIR).resolve()
+
+    try:
+        result = read_file_handler(path, sandbox_root)
+        return JSONResponse(result)
+    except FileNotFoundError as e:
+        return JSONResponse({'error': str(e)}, status_code=404)
+    except PermissionError as e:
+        return JSONResponse({'error': str(e)}, status_code=403)
+    except ValueError as e:
+        return JSONResponse({'error': str(e)}, status_code=400)
+
+
+@app.get('/api/files/modified')
+async def get_modified_files(
+    session_id: str | None = Cookie(default=None),
+) -> JSONResponse:
+    """取得會話中已修改的檔案列表。
+
+    Args:
+        session_id: 會話 Cookie
+
+    Returns:
+        已修改檔案列表
+    """
+    # 目前尚未實作 edit_file 工具，暫時回傳空列表
+    # 待 edit_file 實作後，從 Redis 讀取 session:{id}:modified_files
+    if not session_id:
+        return JSONResponse({'modified_files': []})
+
+    return JSONResponse({'modified_files': []})
 
 
 # --- 伺務前端靜態文件 ---

@@ -1,12 +1,41 @@
+// === API URLs ===
 const STREAM_URL = '/api/chat/stream';
 const RESET_URL = '/api/chat/reset';
+const FILES_TREE_URL = '/api/files/tree';
+const FILES_CONTENT_URL = '/api/files/content';
+const FILES_MODIFIED_URL = '/api/files/modified';
 
+// === Chat DOM 元素 ===
 const messagesEl = document.getElementById('messages');
 const inputEl = document.getElementById('message-input');
 const sendBtn = document.getElementById('send-btn');
 const resetBtn = document.getElementById('reset-btn');
 
+// === 檔案瀏覽 DOM 元素 ===
+const togglePanelBtn = document.getElementById('toggle-panel-btn');
+const filePanel = document.getElementById('file-panel');
+const fileTree = document.getElementById('file-tree');
+const refreshTreeBtn = document.getElementById('refresh-tree-btn');
+const previewPanel = document.getElementById('preview-panel');
+const previewFilename = document.getElementById('preview-filename');
+const previewContent = document.getElementById('preview-content');
+const closePreviewBtn = document.getElementById('close-preview-btn');
+
+// === 狀態 ===
 let isSending = false;
+let modifiedFiles = new Set();
+let isPanelVisible = false;
+let isComposing = false; // 追蹤輸入法組字狀態
+
+// === 初始化檢查 ===
+window.addEventListener('DOMContentLoaded', () => {
+  console.log('Marked 載入狀態:', typeof marked !== 'undefined' ? '已載入' : '未載入');
+  console.log('Highlight.js 載入狀態:', typeof hljs !== 'undefined' ? '已載入' : '未載入');
+});
+
+// ===========================================
+// 聊天功能
+// ===========================================
 
 function setDisabled(disabled) {
   isSending = disabled;
@@ -28,6 +57,62 @@ function createBubble(role, text = '') {
   return bubble;
 }
 
+// 將 Markdown 文字轉換為 HTML
+function renderMarkdown(text) {
+  console.log('[Markdown] 嘗試渲染，文字長度:', text.length);
+  console.log('[Markdown] 前 100 字元:', text.substring(0, 100));
+
+  if (typeof marked === 'undefined') {
+    console.error('[Markdown] marked 未載入，使用純文字');
+    return text.replace(/\n/g, '<br>');
+  }
+
+  try {
+    console.log('[Markdown] marked 物件類型:', typeof marked);
+    console.log('[Markdown] marked.parse 是否存在:', typeof marked.parse);
+
+    // 設定 marked 選項
+    if (marked.setOptions) {
+      marked.setOptions({
+        highlight: function(code, lang) {
+          if (typeof hljs !== 'undefined' && lang) {
+            try {
+              const validLang = hljs.getLanguage(lang);
+              if (validLang) {
+                return hljs.highlight(code, { language: lang }).value;
+              }
+            } catch (e) {
+              console.warn('[Highlight] 語法高亮失敗:', e);
+            }
+          }
+          return code; // 回傳原始程式碼
+        },
+        breaks: true,
+        gfm: true,
+      });
+    }
+
+    // 嘗試不同的 API 呼叫方式
+    let html;
+    if (typeof marked.parse === 'function') {
+      console.log('[Markdown] 使用 marked.parse()');
+      html = marked.parse(text);
+    } else if (typeof marked === 'function') {
+      console.log('[Markdown] 使用 marked()');
+      html = marked(text);
+    } else {
+      throw new Error('無法找到 marked 的渲染方法');
+    }
+
+    console.log('[Markdown] 渲染成功，HTML 長度:', html.length);
+    console.log('[Markdown] HTML 前 300 字元:', html.substring(0, 300));
+    return html;
+  } catch (e) {
+    console.error('[Markdown] 渲染失敗:', e);
+    return text.replace(/\n/g, '<br>');
+  }
+}
+
 function parseSSE(chunk) {
   const events = [];
   let currentEvent = { type: null, data: null };
@@ -45,7 +130,6 @@ function parseSSE(chunk) {
     }
   });
 
-  // 處理最後一個事件（若沒以空行結尾）
   if (currentEvent.type) {
     events.push(currentEvent);
   }
@@ -57,14 +141,13 @@ async function sendMessage() {
   const message = inputEl.value.trim();
   if (!message || isSending) return;
 
-  // 顯示使用者訊息
   createBubble('user', message);
   inputEl.value = '';
   setDisabled(true);
 
-  // 建立 assistant 訊息泡泡（等待填充）
   const assistantBubble = createBubble('assistant', '');
   let buffer = '';
+  let accumulatedText = ''; // 累積 Assistant 回應文字
 
   try {
     const response = await fetch(STREAM_URL, {
@@ -82,7 +165,6 @@ async function sendMessage() {
 
       buffer += decoder.decode(value, { stream: true });
 
-      // 嘗試解析完整的 SSE 事件（以 \n\n 分隔）
       const lastDoubleNewline = buffer.lastIndexOf('\n\n');
       if (lastDoubleNewline === -1) continue;
 
@@ -92,15 +174,52 @@ async function sendMessage() {
       const events = parseSSE(complete);
       for (const evt of events) {
         if (evt.type === 'token') {
-          assistantBubble.textContent += evt.data;
+          // JSON 解碼以正確處理換行符等特殊字元
+          const decodedToken = JSON.parse(evt.data);
+          accumulatedText += decodedToken;
+          assistantBubble.textContent = accumulatedText;
           messagesEl.scrollTop = messagesEl.scrollHeight;
         } else if (evt.type === 'done') {
-          // 完成
+          // 對話完成，將累積的文字轉換為 Markdown
+          console.log('[Done] 收到 done 事件，accumulatedText 長度:', accumulatedText.length);
+          if (accumulatedText) {
+            const html = renderMarkdown(accumulatedText);
+            assistantBubble.innerHTML = html;
+            console.log('[Done] 已設定 innerHTML');
+          }
+          // 重新整理檔案樹以檢查是否有修改
+          if (isPanelVisible) {
+            loadFileTree();
+          }
         } else if (evt.type === 'error') {
           const err = JSON.parse(evt.data);
-          // 移除空的 assistant 泡泡，改顯示錯誤
           assistantBubble.parentElement.remove();
           createBubble('error', `錯誤 (${err.type}): ${err.message}`);
+        } else if (evt.type === 'file_change') {
+          // 未來支援：即時標記修改的檔案
+          const fileData = JSON.parse(evt.data);
+          markFileModified(fileData.path);
+        }
+      }
+    }
+
+    // 串流結束後，處理剩餘的 buffer
+    console.log('[Stream] 串流結束，剩餘 buffer 長度:', buffer.length);
+    if (buffer.trim()) {
+      const events = parseSSE(buffer);
+      console.log('[Stream] 剩餘 buffer 解析出事件數:', events.length);
+      for (const evt of events) {
+        console.log('[Stream] 剩餘事件類型:', evt.type);
+        if (evt.type === 'done') {
+          console.log('[Stream] 剩餘 buffer 中的 done 事件');
+          if (accumulatedText) {
+            const html = renderMarkdown(accumulatedText);
+            assistantBubble.innerHTML = html;
+            console.log('[Stream] 已從剩餘 buffer 設定 innerHTML');
+          }
+          if (isPanelVisible) {
+            loadFileTree();
+          }
         }
       }
     }
@@ -108,23 +227,195 @@ async function sendMessage() {
     assistantBubble.parentElement.remove();
     createBubble('error', `網路錯誤: ${err.message}`);
   } finally {
+    // 確保最後一定會嘗試渲染 Markdown（如果還是純文字狀態）
+    console.log('[Finally] 進入 finally 區塊');
+    console.log('[Finally] accumulatedText 長度:', accumulatedText.length);
+    console.log('[Finally] textContent === accumulatedText:', assistantBubble && assistantBubble.textContent === accumulatedText);
+
+    if (accumulatedText && assistantBubble && assistantBubble.textContent === accumulatedText) {
+      console.log('[Finally] 條件符合，執行 renderMarkdown');
+      const html = renderMarkdown(accumulatedText);
+      assistantBubble.innerHTML = html;
+      console.log('[Finally] 已從 finally 設定 innerHTML');
+    }
     setDisabled(false);
     inputEl.focus();
   }
 }
 
-// 發送按鈕點擊
+// ===========================================
+// 檔案瀏覽功能
+// ===========================================
+
+/**
+ * 切換檔案面板顯示
+ */
+function toggleFilePanel() {
+  isPanelVisible = !isPanelVisible;
+  filePanel.classList.toggle('hidden', !isPanelVisible);
+  togglePanelBtn.classList.toggle('active', isPanelVisible);
+  togglePanelBtn.textContent = isPanelVisible ? '隱藏檔案' : '顯示檔案';
+
+  if (isPanelVisible) {
+    loadFileTree();
+  }
+}
+
+/**
+ * 載入目錄結構
+ */
+async function loadFileTree() {
+  fileTree.innerHTML = '<div class="tree-empty">載入中...</div>';
+
+  try {
+    const [treeRes, modifiedRes] = await Promise.all([
+      fetch(FILES_TREE_URL),
+      fetch(FILES_MODIFIED_URL),
+    ]);
+
+    const treeData = await treeRes.json();
+    const modifiedData = await modifiedRes.json();
+
+    modifiedFiles = new Set(modifiedData.modified_files || []);
+    renderTree(treeData.tree, fileTree);
+  } catch (err) {
+    fileTree.innerHTML = '<div class="tree-error">載入失敗，請稍後重試</div>';
+  }
+}
+
+/**
+ * 渲染目錄樹
+ */
+function renderTree(items, container) {
+  container.innerHTML = '';
+
+  if (!items || items.length === 0) {
+    container.innerHTML = '<div class="tree-empty">目錄為空</div>';
+    return;
+  }
+
+  items.forEach((item) => {
+    const itemEl = document.createElement('div');
+    itemEl.className = `tree-item ${item.type}`;
+
+    if (item.type === 'file' && modifiedFiles.has(item.path)) {
+      itemEl.classList.add('modified');
+    }
+
+    // 圖示
+    const iconEl = document.createElement('span');
+    iconEl.className = 'tree-icon';
+    iconEl.textContent = item.type === 'directory' ? '📁' : '📄';
+
+    // 名稱
+    const nameEl = document.createElement('span');
+    nameEl.className = 'tree-name';
+    nameEl.textContent = item.name;
+
+    itemEl.appendChild(iconEl);
+    itemEl.appendChild(nameEl);
+    itemEl.dataset.path = item.path;
+    itemEl.dataset.type = item.type;
+
+    container.appendChild(itemEl);
+
+    if (item.type === 'directory' && item.children) {
+      const childrenEl = document.createElement('div');
+      childrenEl.className = 'tree-children collapsed';
+      renderTree(item.children, childrenEl);
+      container.appendChild(childrenEl);
+
+      // 目錄點擊展開/收合
+      itemEl.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const isExpanded = !childrenEl.classList.contains('collapsed');
+        childrenEl.classList.toggle('collapsed');
+        iconEl.textContent = isExpanded ? '📁' : '📂';
+      });
+    } else if (item.type === 'file') {
+      // 檔案點擊預覽
+      itemEl.addEventListener('click', (e) => {
+        e.stopPropagation();
+        loadFileContent(item.path, item.name);
+      });
+    }
+  });
+}
+
+/**
+ * 載入檔案內容並顯示預覽
+ */
+async function loadFileContent(path, filename) {
+  previewFilename.textContent = filename;
+  previewContent.textContent = '載入中...';
+  previewContent.className = '';
+  previewPanel.classList.remove('hidden');
+
+  try {
+    const res = await fetch(`${FILES_CONTENT_URL}?path=${encodeURIComponent(path)}`);
+
+    if (!res.ok) {
+      const err = await res.json();
+      throw new Error(err.error || '載入失敗');
+    }
+
+    const data = await res.json();
+
+    previewContent.textContent = data.content;
+
+    // 設定語言 class 並套用語法高亮
+    if (data.language && data.language !== 'plaintext') {
+      previewContent.className = `language-${data.language}`;
+      hljs.highlightElement(previewContent);
+    }
+  } catch (err) {
+    previewContent.textContent = `無法載入檔案: ${err.message}`;
+  }
+}
+
+/**
+ * 關閉預覽面板
+ */
+function closePreview() {
+  previewPanel.classList.add('hidden');
+}
+
+/**
+ * 標記檔案為已修改
+ */
+function markFileModified(path) {
+  modifiedFiles.add(path);
+
+  // 更新 UI 中對應的樹狀項目
+  const treeItem = fileTree.querySelector(`[data-path="${path}"]`);
+  if (treeItem) {
+    treeItem.classList.add('modified');
+  }
+}
+
+// ===========================================
+// 事件綁定
+// ===========================================
+
+// 聊天功能
 sendBtn.addEventListener('click', sendMessage);
 
-// Enter 鍵發送（Shift+Enter 換行）
+// 追蹤輸入法組字狀態
+inputEl.addEventListener('compositionstart', () => {
+  isComposing = true;
+});
+
+inputEl.addEventListener('compositionend', () => {
+  isComposing = false;
+});
+
 inputEl.addEventListener('keydown', (e) => {
-  if (e.key === 'Enter' && !e.shiftKey) {
+  if (e.key === 'Enter' && !e.shiftKey && !isComposing) {
     e.preventDefault();
     sendMessage();
   }
 });
 
-// 清除歷史
 resetBtn.addEventListener('click', async () => {
   try {
     await fetch(RESET_URL, { method: 'POST' });
@@ -133,3 +424,8 @@ resetBtn.addEventListener('click', async () => {
     createBubble('error', '清除歷史失敗，請稍後重試。');
   }
 });
+
+// 檔案瀏覽功能
+togglePanelBtn.addEventListener('click', toggleFilePanel);
+refreshTreeBtn.addEventListener('click', loadFileTree);
+closePreviewBtn.addEventListener('click', closePreview);
