@@ -22,7 +22,15 @@ logger = logging.getLogger(__name__)
 # 預設配置
 DEFAULT_MODEL = 'claude-sonnet-4-20250514'
 DEFAULT_MAX_TOKENS = 8192
-DEFAULT_SYSTEM_PROMPT = '你是一位專業的程式開發助手。請使用繁體中文回答。'
+DEFAULT_SYSTEM_PROMPT = """你是一位專業的程式開發助手。
+
+工作原則：
+- 遇到複雜任務時，先理解需求，再逐步執行
+- 執行操作前，思考是否需要先讀取相關檔案了解現況
+- 解釋你的思考過程和選擇的理由
+- 遇到不確定的情況，主動詢問使用者
+
+請使用繁體中文回答。"""
 
 
 @dataclass
