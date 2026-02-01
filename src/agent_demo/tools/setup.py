@@ -66,13 +66,13 @@ def _register_read_file(registry: ToolRegistry, sandbox_root: Path) -> None:
         name='read_file',
         description="""讀取專案中的檔案內容。
 
-使用時機：
-- 使用者要求查看程式碼
-- 需要理解現有實作再進行修改
-- 分析錯誤訊息中提到的檔案
-- 檢查配置檔案內容
+        使用時機：
+        - 使用者要求查看程式碼
+        - 需要理解現有實作再進行修改
+        - 分析錯誤訊息中提到的檔案
+        - 檢查配置檔案內容
 
-回傳：檔案的文字內容、路徑與程式語言識別。""",
+        回傳：檔案的文字內容、路徑與程式語言識別。""",
         parameters={
             'type': 'object',
             'properties': {
@@ -121,16 +121,16 @@ def _register_bash(registry: ToolRegistry, sandbox_root: Path) -> None:
         name='bash',
         description="""執行 bash 命令來操作專案環境。
 
-常見用途：
-- 執行測試：pytest, npm test
-- 檢查程式碼品質：ruff check, ruff format, pyright
-- 套件管理：uv add, uv remove, npm install
-- Git 操作：git status, git diff, git log
-- 瀏覽檔案：ls, find, tree
+        常見用途：
+        - 執行測試：pytest, npm test
+        - 檢查程式碼品質：ruff check, ruff format, pyright
+        - 套件管理：uv add, uv remove, npm install
+        - Git 操作：git status, git diff, git log
+        - 瀏覽檔案：ls, find, tree
 
-限制：僅可在 sandbox 目錄內執行，禁止危險與系統修改命令（如 rm -rf, sudo 等）。
+        限制：僅可在 sandbox 目錄內執行，禁止危險與系統修改命令（如 rm -rf, sudo 等）。
 
-回傳：命令執行結果（exit code、stdout、stderr）。""",
+        回傳：命令執行結果（exit code、stdout、stderr）。""",
         parameters={
             'type': 'object',
             'properties': {
