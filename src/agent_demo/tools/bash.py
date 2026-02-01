@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import logging
+import os
 import re
 import subprocess
 from pathlib import Path
@@ -144,6 +145,7 @@ def execute_command(
     command: str,
     cwd: Path,
     timeout: int,
+    sandbox_root: Path | None = None,
 ) -> dict[str, Any]:
     """執行命令並回傳結果。
 
@@ -151,6 +153,7 @@ def execute_command(
         command: 命令字串
         cwd: 工作目錄
         timeout: 超時秒數
+        sandbox_root: sandbox 根目錄，用於限制 git 搜尋範圍
 
     Returns:
         包含 exit_code, stdout, stderr 的字典
@@ -159,6 +162,15 @@ def execute_command(
         TimeoutError: 命令執行超時
     """
     try:
+        # 建立執行環境，繼承當前環境變數
+        env = os.environ.copy()
+
+        # 設定 GIT_CEILING_DIRECTORIES 防止 git 往 sandbox 外搜尋 .git
+        if sandbox_root is not None:
+            ceiling = str(sandbox_root.resolve().parent)
+            existing = env.get('GIT_CEILING_DIRECTORIES', '')
+            env['GIT_CEILING_DIRECTORIES'] = f'{ceiling}:{existing}' if existing else ceiling
+
         # 使用 shell=True 支援管道、重定向等
         # text=True 自動處理編碼
         # capture_output=True 捕獲 stdout 和 stderr
@@ -169,8 +181,7 @@ def execute_command(
             timeout=timeout,
             capture_output=True,
             text=True,
-            # 環境變數繼承當前環境（包含 PATH 等）
-            env=None,
+            env=env,
         )
 
         stdout = result.stdout
@@ -256,7 +267,7 @@ def bash_handler(
     )
 
     # 5. 執行命令
-    exec_result = execute_command(command, cwd, timeout)
+    exec_result = execute_command(command, cwd, timeout, sandbox_root)
 
     # 6. 構造回應
     # 計算相對於 sandbox 的路徑（如果 cwd 在 sandbox 內）

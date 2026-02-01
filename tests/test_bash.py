@@ -371,3 +371,31 @@ class TestEnvironment:
         # 應該被遮蔽
         assert 'sk-ant-api03' not in result['stdout']
         assert '[ANTHROPIC_API_KEY]' in result['stdout']
+
+    def test_git_isolated_to_sandbox(
+        self,
+        bash_handler_fn: Any,
+        sandbox_dir: Path,
+    ) -> None:
+        """Scenario: Git 命令被限制在 sandbox 內。
+
+        Given sandbox 是包含 .git 的目錄
+        And sandbox 的上層目錄也是 git 儲存庫
+        When 執行 "git status"
+        Then 結果應為 sandbox 內的 git 狀態
+        And 不應顯示上層目錄的 git 狀態
+        """
+        # sandbox_dir 已在 fixture 中初始化為 git repo
+        # 在 sandbox 中新增檔案
+        test_file = sandbox_dir / 'new_file.txt'
+        test_file.write_text('test content\n', encoding='utf-8')
+
+        result = bash_handler_fn('git status')
+
+        # 應成功執行（sandbox 內有 .git）
+        assert result['exit_code'] == 0
+        # 應顯示 sandbox 內的未追蹤檔案
+        assert 'new_file.txt' in result['stdout']
+        # 不應提及 sandbox 外的檔案（例如專案根目錄的檔案）
+        # 驗證方式：git status 輸出應只包含 sandbox 相對路徑
+        assert 'agent_demo' not in result['stdout']  # 專案目錄名稱不應出現
