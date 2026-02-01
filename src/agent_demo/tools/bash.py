@@ -23,8 +23,14 @@ SENSITIVE_PATTERNS: list[tuple[str, str]] = [
     (r'\bghp_[a-zA-Z0-9]{20,}', '[GITHUB_TOKEN]'),  # GitHub token
     (r'\bgho_[a-zA-Z0-9]{20,}', '[GITHUB_OAUTH]'),  # GitHub OAuth
     (r'\b(AWS|AKIA)[A-Z0-9]{16,}', '[AWS_ACCESS_KEY]'),  # AWS access key
-    (r'password[=:]\s*["\']?([^"\'\s]+)', 'password=[REDACTED]'),
-    (r'token[=:]\s*["\']?([^"\'\s]+)', 'token=[REDACTED]'),
+    (
+        r'password[=:]\s*["\']?([^"\'\s]+)',
+        'password=[REDACTED]',
+    ),  # nosonar - 正則表達式用於遮蔽密碼，非硬編碼憑證
+    (
+        r'token[=:]\s*["\']?([^"\'\s]+)',
+        'token=[REDACTED]',
+    ),  # nosonar - 正則表達式用於遮蔽 token，非硬編碼憑證
 ]
 
 # 危險命令模式（使用正則表達式）
