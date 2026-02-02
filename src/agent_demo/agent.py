@@ -16,6 +16,7 @@ from anthropic import APIConnectionError, APIStatusError, AuthenticationError
 from anthropic.types import MessageParam, ToolResultBlockParam
 
 from agent_demo.tools.registry import ToolRegistry
+from agent_demo.usage_monitor import UsageMonitor
 
 logger = logging.getLogger(__name__)
 
@@ -55,12 +56,14 @@ class Agent:
         client: Anthropic API 客戶端
         conversation: 對話歷史紀錄
         tool_registry: 工具註冊表（可選）
+        usage_monitor: 使用量監控器（可選）
     """
 
     config: AgentConfig = field(default_factory=AgentConfig)
     client: Any = None  # anthropic.AsyncAnthropic | MagicMock
     conversation: list[MessageParam] = field(default_factory=lambda: [])
     tool_registry: ToolRegistry | None = None
+    usage_monitor: UsageMonitor | None = field(default_factory=lambda: UsageMonitor())
 
     def __post_init__(self) -> None:
         """初始化 API 客戶端與快取固定參數。"""
@@ -71,7 +74,13 @@ class Agent:
         self._base_kwargs: dict[str, Any] = {
             'model': self.config.model,
             'max_tokens': self.config.max_tokens,
-            'system': self.config.system_prompt,
+            'system': [
+                {
+                    'type': 'text',
+                    'text': self.config.system_prompt,
+                    'cache_control': {'type': 'ephemeral'},
+                }
+            ],
             'timeout': self.config.timeout,
         }
 
@@ -227,6 +236,10 @@ class Agent:
                         yield text
 
                     final_message = await stream.get_final_message()
+
+                # 記錄 API 使用量
+                if self.usage_monitor and hasattr(final_message, 'usage'):
+                    self.usage_monitor.record(final_message.usage)
 
                 # 將 assistant 回應加入對話歷史（轉換為可序列化格式）
                 self.conversation.append(

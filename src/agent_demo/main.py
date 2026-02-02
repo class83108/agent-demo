@@ -226,12 +226,17 @@ async def _stream_chat(
     Yields:
         格式化的 SSE 事件字串
     """
-    # 從 Redis 讀取歷史
+    # 從 Redis 讀取歷史和使用量統計
     conversation = await session_manager.load(session_id)
+    usage_data = await session_manager.load_usage(session_id)
 
     # 建立 Agent（使用全局工具註冊表，帶入歷史）
     agent = Agent(config=AgentConfig(), client=None, tool_registry=tool_registry)
     agent.conversation = list(conversation)
+
+    # 載入歷史使用量統計
+    if agent.usage_monitor and usage_data:
+        agent.usage_monitor.load_from_dicts(usage_data)
 
     try:
         async for token in agent.stream_message(message):
@@ -241,8 +246,10 @@ async def _stream_chat(
         for event in _extract_sse_events(agent.conversation):
             yield _sse_event(event['type'], event['data'])
 
-        # 串流完成，儲存更新後的歷史
+        # 串流完成，儲存更新後的歷史和使用量統計
         await session_manager.save(session_id, agent.conversation)
+        if agent.usage_monitor:
+            await session_manager.save_usage(session_id, agent.usage_monitor.records)
         yield _sse_event('done', '')
 
     except (ValueError, ConnectionError, PermissionError, TimeoutError, RuntimeError) as e:
@@ -332,6 +339,58 @@ async def chat_reset(
     await session_manager.reset(session_id)
     logger.info('會話歷史已清除', extra={'session_id': session_id})
     return JSONResponse({'status': 'ok', 'message': '歷史已清除'})
+
+
+@app.get('/api/chat/usage')
+async def chat_usage(
+    session_id: str | None = Cookie(default=None),
+) -> JSONResponse:
+    """查看 API 使用量統計端點。
+
+    Args:
+        session_id: 會話 Cookie
+
+    Returns:
+        使用量統計摘要
+    """
+    if not session_id:
+        return JSONResponse(
+            {'error': '需要會話 ID'},
+            status_code=400,
+        )
+
+    # 從 Redis 載入使用量統計並計算摘要
+    from agent_demo.usage_monitor import UsageMonitor
+
+    usage_data = await session_manager.load_usage(session_id)
+    monitor = UsageMonitor()
+    if usage_data:
+        monitor.load_from_dicts(usage_data)
+
+    summary = monitor.get_summary()
+    return JSONResponse(summary)
+
+
+@app.post('/api/chat/usage/reset')
+async def chat_usage_reset(
+    session_id: str | None = Cookie(default=None),
+) -> JSONResponse:
+    """重設使用量統計端點。
+
+    Args:
+        session_id: 會話 Cookie
+
+    Returns:
+        重設結果
+    """
+    if not session_id:
+        return JSONResponse(
+            {'error': '需要會話 ID'},
+            status_code=400,
+        )
+
+    await session_manager.reset_usage(session_id)
+    return JSONResponse({'status': 'ok', 'message': '使用量統計已重設'})
 
 
 @app.get('/health')

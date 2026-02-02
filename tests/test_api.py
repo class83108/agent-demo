@@ -75,6 +75,9 @@ def _make_mock_session_manager() -> MagicMock:
     manager.load = AsyncMock(return_value=[])
     manager.save = AsyncMock()
     manager.reset = AsyncMock()
+    manager.load_usage = AsyncMock(return_value=[])
+    manager.save_usage = AsyncMock()
+    manager.reset_usage = AsyncMock()
     return manager
 
 

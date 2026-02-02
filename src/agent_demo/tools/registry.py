@@ -93,14 +93,22 @@ class ToolRegistry:
         Returns:
             工具定義列表，符合 Claude API tools 參數格式
         """
-        return [
-            {
+        tools = list(self._tools.values())
+        definitions: list[dict[str, Any]] = []
+
+        for i, tool in enumerate(tools):
+            definition: dict[str, Any] = {
                 'name': tool.name,
                 'description': tool.description,
                 'input_schema': tool.parameters,
             }
-            for tool in self._tools.values()
-        ]
+            # 在最後一個工具加上 cache_control，啟用 prompt caching
+            if i == len(tools) - 1:
+                definition['cache_control'] = {'type': 'ephemeral'}
+
+            definitions.append(definition)
+
+        return definitions
 
     async def execute(self, name: str, arguments: dict[str, Any]) -> Any:
         """執行指定工具。
