@@ -13,6 +13,7 @@ from agent_demo.tools.bash import bash_handler
 from agent_demo.tools.file_edit import edit_file_handler
 from agent_demo.tools.file_list import list_files_handler
 from agent_demo.tools.file_read import read_file_handler
+from agent_demo.tools.grep_search import grep_search_handler
 from agent_demo.tools.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
@@ -44,6 +45,9 @@ def create_default_registry(
 
     # 註冊 bash 工具
     _register_bash(registry, sandbox_root)
+
+    # 註冊 grep_search 工具
+    _register_grep_search(registry, sandbox_root)
 
     logger.info('預設工具註冊表已建立', extra={'tools': registry.list_tools()})
     return registry
@@ -315,4 +319,91 @@ def _register_bash(registry: ToolRegistry, sandbox_root: Path) -> None:
         },
         handler=_handler,
         file_param=None,  # bash 不操作特定檔案，不需要鎖定
+    )
+
+
+def _register_grep_search(registry: ToolRegistry, sandbox_root: Path) -> None:
+    """註冊 grep_search 工具。
+
+    Args:
+        registry: 工具註冊表
+        sandbox_root: sandbox 根目錄
+    """
+
+    def _handler(
+        pattern: str,
+        path: str = '.',
+        include: list[str] | None = None,
+        exclude_dirs: list[str] | None = None,
+        case_sensitive: bool = True,
+        whole_word: bool = False,
+        context_lines: int = 0,
+        max_results: int = 100,
+    ) -> dict[str, Any]:
+        """grep_search handler 閉包，綁定 sandbox_root。"""
+        return grep_search_handler(
+            pattern=pattern,
+            sandbox_root=sandbox_root,
+            path=path,
+            include=include,
+            exclude_dirs=exclude_dirs,
+            case_sensitive=case_sensitive,
+            whole_word=whole_word,
+            context_lines=context_lines,
+            max_results=max_results,
+        )
+
+    registry.register(
+        name='grep_search',
+        description="""搜尋程式碼中的關鍵字或模式。
+
+        使用時機：
+        - 尋找特定函數、類別、變數的定義或使用位置
+        - 搜尋 TODO、FIXME 等標記
+        - 找出特定字串或模式出現的所有位置
+        - 快速定位程式碼，比讀取整個檔案更有效率
+
+        回傳：匹配結果清單，包含檔案路徑、行號、內容。""",
+        parameters={
+            'type': 'object',
+            'properties': {
+                'pattern': {
+                    'type': 'string',
+                    'description': '搜尋模式（支援正則表達式）',
+                },
+                'path': {
+                    'type': 'string',
+                    'description': '搜尋路徑（相對於 sandbox 根目錄，預設為 "."）',
+                },
+                'include': {
+                    'type': 'array',
+                    'items': {'type': 'string'},
+                    'description': '只搜尋符合模式的檔案，如 ["*.py", "*.js"]',
+                },
+                'exclude_dirs': {
+                    'type': 'array',
+                    'items': {'type': 'string'},
+                    'description': '額外要排除的目錄（預設已排除 node_modules、.git 等）',
+                },
+                'case_sensitive': {
+                    'type': 'boolean',
+                    'description': '是否區分大小寫（預設 true）',
+                },
+                'whole_word': {
+                    'type': 'boolean',
+                    'description': '是否全詞匹配（預設 false）',
+                },
+                'context_lines': {
+                    'type': 'integer',
+                    'description': '顯示匹配行前後的上下文行數（預設 0）',
+                },
+                'max_results': {
+                    'type': 'integer',
+                    'description': '最大結果數量（預設 100）',
+                },
+            },
+            'required': ['pattern'],
+        },
+        handler=_handler,
+        file_param=None,  # grep_search 是唯讀搜尋，不需要鎖定
     )
