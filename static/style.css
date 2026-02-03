@@ -444,6 +444,120 @@ header h1 {
   background: #fafafa;
 }
 
+/* === 工具狀態顯示 === */
+.tool-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  margin: 6px 0;
+  border-radius: 6px;
+  font-size: 0.85rem;
+  color: #555;
+  background: #f5f5f5;
+  border: 1px solid #e8e8e8;
+}
+
+.tool-status.running {
+  color: #1a73e8;
+  background: #e8f0fe;
+  border-color: #c2d9f7;
+}
+
+.tool-status.completed {
+  color: #1a7f37;
+  background: #dafbe1;
+  border-color: #a7e3b5;
+}
+
+.tool-status.failed {
+  color: #cf222e;
+  background: #ffebe9;
+  border-color: #f5c6cb;
+}
+
+.tool-spinner {
+  display: inline-block;
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+}
+
+.tool-status.running .tool-spinner::after {
+  content: '';
+  display: block;
+  width: 14px;
+  height: 14px;
+  border: 2px solid #a0c4ff;
+  border-top-color: #1a73e8;
+  border-radius: 50%;
+  animation: tool-spin 0.8s linear infinite;
+}
+
+.tool-status.completed .tool-spinner::after {
+  content: '✓';
+  font-size: 0.85rem;
+  line-height: 14px;
+  color: #1a7f37;
+}
+
+.tool-status.failed .tool-spinner::after {
+  content: '✗';
+  font-size: 0.85rem;
+  line-height: 14px;
+  color: #cf222e;
+}
+
+@keyframes tool-spin {
+  to { transform: rotate(360deg); }
+}
+
+.tool-summary-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* === Preamble（可折疊的思考過程）=== */
+.preamble {
+  margin-bottom: 8px;
+  border-radius: 6px;
+  border: 1px solid #e8e8e8;
+  overflow: hidden;
+}
+
+.preamble-toggle {
+  padding: 6px 10px;
+  font-size: 0.8rem;
+  color: #888;
+  cursor: pointer;
+  user-select: none;
+  background: #fafafa;
+  transition: background 0.15s;
+}
+
+.preamble-toggle:hover {
+  background: #f0f0f0;
+  color: #555;
+}
+
+.preamble-content {
+  padding: 8px 10px;
+  font-size: 0.85rem;
+  color: #666;
+  line-height: 1.5;
+  border-top: 1px solid #e8e8e8;
+}
+
+.preamble.collapsed .preamble-content {
+  display: none;
+}
+
+/* === 回覆文字區塊 === */
+.response-text:empty {
+  display: none;
+}
+
 .input-area {
   display: flex;
   gap: 8px;

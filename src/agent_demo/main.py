@@ -239,10 +239,15 @@ async def _stream_chat(
         agent.usage_monitor.load_from_dicts(usage_data)
 
     try:
-        async for token in agent.stream_message(message):
-            yield _sse_event('token', token)
+        async for item in agent.stream_message(message):
+            if isinstance(item, str):
+                # 文字 token
+                yield _sse_event('token', item)
+            else:
+                # 事件通知（tool_call、preamble_end）
+                yield _sse_event(item['type'], item.get('data', {}))
 
-        # 提取並推送工具執行的 SSE 事件
+        # 提取並推送工具執行的 SSE 事件（file_open、file_change 等）
         for event in _extract_sse_events(agent.conversation):
             yield _sse_event(event['type'], event['data'])
 

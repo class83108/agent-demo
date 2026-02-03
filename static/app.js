@@ -216,6 +216,51 @@ function parseSSE(chunk) {
   return events;
 }
 
+/**
+ * 建立工具狀態元素
+ */
+function createToolStatusEl(summary) {
+  const el = document.createElement('div');
+  el.className = 'tool-status running';
+
+  const spinner = document.createElement('span');
+  spinner.className = 'tool-spinner';
+
+  const text = document.createElement('span');
+  text.className = 'tool-summary-text';
+  text.textContent = summary;
+
+  el.appendChild(spinner);
+  el.appendChild(text);
+  return el;
+}
+
+/**
+ * 將累積文字包裝為可折疊的 preamble 區塊
+ */
+function wrapAsPreamble(bubble, text) {
+  const preamble = document.createElement('div');
+  preamble.className = 'preamble collapsed';
+
+  const toggle = document.createElement('div');
+  toggle.className = 'preamble-toggle';
+  toggle.textContent = '展開思考過程';
+  toggle.addEventListener('click', () => {
+    const isCollapsed = preamble.classList.toggle('collapsed');
+    toggle.textContent = isCollapsed ? '展開思考過程' : '收合思考過程';
+  });
+
+  const content = document.createElement('div');
+  content.className = 'preamble-content';
+  content.innerHTML = renderMarkdown(text);
+
+  preamble.appendChild(toggle);
+  preamble.appendChild(content);
+
+  // 插入到 bubble 的最前面（在其他元素之前）
+  bubble.insertBefore(preamble, bubble.firstChild);
+}
+
 async function sendMessage() {
   const message = inputEl.value.trim();
   if (!message || isSending) return;
@@ -226,7 +271,10 @@ async function sendMessage() {
 
   const assistantBubble = createBubble('assistant', '');
   let buffer = '';
-  let accumulatedText = ''; // 累積 Assistant 回應文字
+  let accumulatedText = ''; // 當前區段累積的文字
+  let finalText = ''; // 最終回覆的文字
+  let currentTextEl = assistantBubble; // 目前文字輸出的目標元素
+  let toolStatusMap = new Map(); // 追蹤工具狀態元素
 
   try {
     const response = await fetch(STREAM_URL, {
@@ -253,28 +301,66 @@ async function sendMessage() {
       const events = parseSSE(complete);
       for (const evt of events) {
         if (evt.type === 'token') {
-          // JSON 解碼以正確處理換行符等特殊字元
           const decodedToken = JSON.parse(evt.data);
           accumulatedText += decodedToken;
-          assistantBubble.textContent = accumulatedText;
+          currentTextEl.textContent = accumulatedText;
           messagesEl.scrollTop = messagesEl.scrollHeight;
-        } else if (evt.type === 'done') {
-          // 對話完成，將累積的文字轉換為 Markdown
-          console.log('[Done] 收到 done 事件，accumulatedText 長度:', accumulatedText.length);
+
+        } else if (evt.type === 'preamble_end') {
+          // 將已累積的文字包裝為可折疊 preamble
           if (accumulatedText) {
-            const html = renderMarkdown(accumulatedText);
-            assistantBubble.innerHTML = html;
+            // 清除 bubble 內目前的文字
+            currentTextEl.textContent = '';
+            wrapAsPreamble(assistantBubble, accumulatedText);
+            accumulatedText = '';
           }
-          // 重新整理檔案樹以檢查是否有修改
+
+        } else if (evt.type === 'tool_call') {
+          const data = JSON.parse(evt.data);
+          const toolKey = data.name + '_' + toolStatusMap.size;
+
+          if (data.status === 'started') {
+            const statusEl = createToolStatusEl(data.summary);
+            assistantBubble.appendChild(statusEl);
+            toolStatusMap.set(toolKey, statusEl);
+            // 建立新的文字區域給後續 token 使用
+            currentTextEl = document.createElement('div');
+            currentTextEl.className = 'response-text';
+            assistantBubble.appendChild(currentTextEl);
+
+          } else if (data.status === 'completed') {
+            // 找到最後一個同名工具的狀態元素
+            const statusEl = findLastToolStatus(toolStatusMap, data.name);
+            if (statusEl) {
+              statusEl.classList.remove('running');
+              statusEl.classList.add('completed');
+            }
+
+          } else if (data.status === 'failed') {
+            const statusEl = findLastToolStatus(toolStatusMap, data.name);
+            if (statusEl) {
+              statusEl.classList.remove('running');
+              statusEl.classList.add('failed');
+            }
+          }
+          messagesEl.scrollTop = messagesEl.scrollHeight;
+
+        } else if (evt.type === 'done') {
+          finalText = accumulatedText;
+          console.log('[Done] 收到 done 事件，finalText 長度:', finalText.length);
+          if (finalText) {
+            currentTextEl.innerHTML = renderMarkdown(finalText);
+          }
           if (isPanelVisible) {
             loadFileTree();
           }
+
         } else if (evt.type === 'error') {
           const err = JSON.parse(evt.data);
           assistantBubble.parentElement.remove();
           createBubble('error', `錯誤 (${err.type}): ${err.message}`);
+
         } else if (evt.type === 'file_change') {
-          // 儲存檔案的 diff 資訊並標記為已修改
           const fileData = JSON.parse(evt.data);
           fileDiffs.set(fileData.path, fileData.diff);
           markFileModified(fileData.path);
@@ -287,10 +373,9 @@ async function sendMessage() {
       const events = parseSSE(buffer);
       for (const evt of events) {
         if (evt.type === 'done') {
-          if (accumulatedText) {
-            const html = renderMarkdown(accumulatedText);
-            assistantBubble.innerHTML = html;
-            console.log('[Stream] 已從剩餘 buffer 設定 innerHTML');
+          finalText = accumulatedText;
+          if (finalText) {
+            currentTextEl.innerHTML = renderMarkdown(finalText);
           }
           if (isPanelVisible) {
             loadFileTree();
@@ -302,15 +387,26 @@ async function sendMessage() {
     assistantBubble.parentElement.remove();
     createBubble('error', `網路錯誤: ${err.message}`);
   } finally {
-    // 確保最後一定會嘗試渲染 Markdown（如果還是純文字狀態）
-    if (accumulatedText && assistantBubble && assistantBubble.textContent === accumulatedText) {
-      console.log('[Finally] 條件符合，執行 renderMarkdown');
-      const html = renderMarkdown(accumulatedText);
-      assistantBubble.innerHTML = html;
+    // 確保最後一定會嘗試渲染 Markdown
+    if (accumulatedText && currentTextEl && currentTextEl.textContent === accumulatedText) {
+      currentTextEl.innerHTML = renderMarkdown(accumulatedText);
     }
     setDisabled(false);
     inputEl.focus();
   }
+}
+
+/**
+ * 找到 toolStatusMap 中最後一個符合工具名稱的元素
+ */
+function findLastToolStatus(toolStatusMap, toolName) {
+  let lastEl = null;
+  for (const [key, el] of toolStatusMap) {
+    if (key.startsWith(toolName + '_')) {
+      lastEl = el;
+    }
+  }
+  return lastEl;
 }
 
 // ===========================================
