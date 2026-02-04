@@ -236,9 +236,9 @@ function createToolStatusEl(summary) {
 }
 
 /**
- * 將累積文字包裝為可折疊的 preamble 區塊
+ * 建立可折疊的 preamble 區塊元素
  */
-function wrapAsPreamble(bubble, text) {
+function createPreambleEl(text) {
   const preamble = document.createElement('div');
   preamble.className = 'preamble collapsed';
 
@@ -256,9 +256,7 @@ function wrapAsPreamble(bubble, text) {
 
   preamble.appendChild(toggle);
   preamble.appendChild(content);
-
-  // 插入到 bubble 的最前面（在其他元素之前）
-  bubble.insertBefore(preamble, bubble.firstChild);
+  return preamble;
 }
 
 async function sendMessage() {
@@ -273,7 +271,10 @@ async function sendMessage() {
   let buffer = '';
   let accumulatedText = ''; // 當前區段累積的文字
   let finalText = ''; // 最終回覆的文字
-  let currentTextEl = assistantBubble; // 目前文字輸出的目標元素
+  // 建立獨立的文字區域（不直接使用 bubble，方便 preamble 定位插入）
+  let currentTextEl = document.createElement('div');
+  currentTextEl.className = 'response-text';
+  assistantBubble.appendChild(currentTextEl);
   let toolStatusMap = new Map(); // 追蹤工具狀態元素
 
   try {
@@ -303,15 +304,22 @@ async function sendMessage() {
         if (evt.type === 'token') {
           const decodedToken = JSON.parse(evt.data);
           accumulatedText += decodedToken;
+          // preamble_end 後 currentTextEl 會被移除，收到新 token 時重建
+          if (!currentTextEl || !currentTextEl.isConnected) {
+            currentTextEl = document.createElement('div');
+            currentTextEl.className = 'response-text';
+            assistantBubble.appendChild(currentTextEl);
+          }
           currentTextEl.textContent = accumulatedText;
           messagesEl.scrollTop = messagesEl.scrollHeight;
 
         } else if (evt.type === 'preamble_end') {
-          // 將已累積的文字包裝為可折疊 preamble
+          // 將已累積的文字包裝為可折疊 preamble（插在 currentTextEl 的位置）
           if (accumulatedText) {
-            // 清除 bubble 內目前的文字
-            currentTextEl.textContent = '';
-            wrapAsPreamble(assistantBubble, accumulatedText);
+            const preamble = createPreambleEl(accumulatedText);
+            assistantBubble.insertBefore(preamble, currentTextEl);
+            currentTextEl.remove();
+            currentTextEl = null;
             accumulatedText = '';
           }
 
@@ -348,7 +356,7 @@ async function sendMessage() {
         } else if (evt.type === 'done') {
           finalText = accumulatedText;
           console.log('[Done] 收到 done 事件，finalText 長度:', finalText.length);
-          if (finalText) {
+          if (finalText && currentTextEl) {
             currentTextEl.innerHTML = renderMarkdown(finalText);
           }
           if (isPanelVisible) {
@@ -374,7 +382,7 @@ async function sendMessage() {
       for (const evt of events) {
         if (evt.type === 'done') {
           finalText = accumulatedText;
-          if (finalText) {
+          if (finalText && currentTextEl) {
             currentTextEl.innerHTML = renderMarkdown(finalText);
           }
           if (isPanelVisible) {
@@ -387,8 +395,8 @@ async function sendMessage() {
     assistantBubble.parentElement.remove();
     createBubble('error', `網路錯誤: ${err.message}`);
   } finally {
-    // 確保最後一定會嘗試渲染 Markdown
-    if (accumulatedText && currentTextEl && currentTextEl.textContent === accumulatedText) {
+    // 確保最後一定會嘗試渲染 Markdown（currentTextEl 可能在 preamble_end 後被移除）
+    if (accumulatedText && currentTextEl && currentTextEl.isConnected && currentTextEl.textContent === accumulatedText) {
       currentTextEl.innerHTML = renderMarkdown(accumulatedText);
     }
     setDisabled(false);
