@@ -1,6 +1,6 @@
 """API 使用量監控模組。
 
-追蹤 Claude API 的 token 使用量，用於分析 prompt caching 效果。
+追蹤 LLM API 的 token 使用量，支援多模型定價。
 """
 
 from __future__ import annotations
@@ -11,6 +11,36 @@ from datetime import datetime
 from typing import Any
 
 logger = logging.getLogger(__name__)
+
+# 多模型定價表（USD per million tokens）
+MODEL_PRICING: dict[str, dict[str, float]] = {
+    'claude-sonnet-4-20250514': {
+        'input': 3.0,
+        'output': 15.0,
+        'cache_write': 3.75,
+        'cache_read': 0.30,
+    },
+    'claude-haiku-4-20250514': {
+        'input': 0.80,
+        'output': 4.0,
+        'cache_write': 1.0,
+        'cache_read': 0.08,
+    },
+    'claude-opus-4-20250514': {
+        'input': 15.0,
+        'output': 75.0,
+        'cache_write': 18.75,
+        'cache_read': 1.50,
+    },
+}
+
+# 找不到模型時的預設定價
+_DEFAULT_PRICING: dict[str, float] = {
+    'input': 3.0,
+    'output': 15.0,
+    'cache_write': 3.75,
+    'cache_read': 0.30,
+}
 
 
 @dataclass
@@ -75,12 +105,20 @@ class UsageMonitor:
     """API 使用量監控器。
 
     追蹤每次 API 呼叫的 token 使用量，並提供統計摘要。
+    支援多模型定價。
     """
 
+    # 使用的模型名稱（用於定價計算）
+    model: str = 'claude-sonnet-4-20250514'
     # 使用量記錄列表
     records: list[UsageRecord] = field(default_factory=lambda: [])
     # 是否啟用監控
     enabled: bool = True
+
+    @property
+    def _pricing(self) -> dict[str, float]:
+        """取得目前模型的定價。"""
+        return MODEL_PRICING.get(self.model, _DEFAULT_PRICING)
 
     def record(self, usage: Any) -> UsageRecord | None:
         """記錄一次 API 呼叫的使用量。
@@ -137,18 +175,18 @@ class UsageMonitor:
         # 計算整體快取命中率
         overall_cache_hit_rate = total_cache_read / total_all_input if total_all_input > 0 else 0.0
 
-        # 計算成本估算（以 Claude Sonnet 4 為基準）
-        # 基礎: $3/MTok input, $15/MTok output
-        # 快取寫入: $3.75/MTok (1.25x)
-        # 快取讀取: $0.30/MTok (0.1x)
-        cost_input = total_input * 3.0 / 1_000_000
-        cost_output = total_output * 15.0 / 1_000_000
-        cost_cache_write = total_cache_creation * 3.75 / 1_000_000
-        cost_cache_read = total_cache_read * 0.30 / 1_000_000
+        # 根據模型定價計算成本估算
+        pricing = self._pricing
+        cost_input = total_input * pricing['input'] / 1_000_000
+        cost_output = total_output * pricing['output'] / 1_000_000
+        cost_cache_write = total_cache_creation * pricing['cache_write'] / 1_000_000
+        cost_cache_read = total_cache_read * pricing['cache_read'] / 1_000_000
         total_cost = cost_input + cost_output + cost_cache_write + cost_cache_read
 
         # 計算如果沒有快取的成本（所有輸入都按基礎價格計算）
-        cost_without_cache = (total_all_input * 3.0 + total_output * 15.0) / 1_000_000
+        cost_without_cache = (
+            total_all_input * pricing['input'] + total_output * pricing['output']
+        ) / 1_000_000
         cost_saved = cost_without_cache - total_cost
 
         return {

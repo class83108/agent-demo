@@ -20,12 +20,14 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from agent_demo.agent import Agent, AgentConfig
-from agent_demo.session import SessionManager
-from agent_demo.tools.file_read import detect_language, read_file_handler
-from agent_demo.tools.registry import ToolRegistry
-from agent_demo.tools.setup import create_default_registry
-from agent_demo.types import ContentBlock
+from agent_core.agent import Agent
+from agent_core.config import AgentCoreConfig
+from agent_core.providers.anthropic_provider import AnthropicProvider
+from agent_core.session import SessionManager
+from agent_core.tools.file_read import detect_language, read_file_handler
+from agent_core.tools.registry import ToolRegistry
+from agent_core.tools.setup import create_default_registry
+from agent_core.types import ContentBlock
 
 # 在匯入 Anthropic client 之前加載 .env
 load_dotenv()
@@ -231,7 +233,9 @@ async def _stream_chat(
     usage_data = await session_manager.load_usage(session_id)
 
     # 建立 Agent（使用全局工具註冊表，帶入歷史）
-    agent = Agent(config=AgentConfig(), client=None, tool_registry=tool_registry)
+    config = AgentCoreConfig()
+    provider = AnthropicProvider(config.provider)
+    agent = Agent(config=config, provider=provider, tool_registry=tool_registry)
     agent.conversation = list(conversation)
 
     # 載入歷史使用量統計
@@ -257,7 +261,7 @@ async def _stream_chat(
             await session_manager.save_usage(session_id, agent.usage_monitor.records)
         yield _sse_event('done', '')
 
-    except (ValueError, ConnectionError, PermissionError, TimeoutError, RuntimeError) as e:
+    except (ValueError, Exception) as e:
         # 錯誤時傳出 SSE error 事件
         error_data = {'type': type(e).__name__, 'message': str(e)}
         yield _sse_event('error', error_data)
@@ -365,7 +369,7 @@ async def chat_usage(
         )
 
     # 從 Redis 載入使用量統計並計算摘要
-    from agent_demo.usage_monitor import UsageMonitor
+    from agent_core.usage_monitor import UsageMonitor
 
     usage_data = await session_manager.load_usage(session_id)
     monitor = UsageMonitor()

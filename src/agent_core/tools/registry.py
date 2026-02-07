@@ -38,6 +38,7 @@ class Tool:
     parameters: dict[str, Any]
     handler: Callable[..., Any]
     file_param: str | None = None  # 指定哪個參數是檔案路徑
+    source: str = 'native'  # 來源標記（native / skill / mcp）
 
 
 @dataclass
@@ -78,6 +79,20 @@ class ToolRegistry:
         )
         logger.info('工具已註冊', extra={'tool_name': name, 'file_param': file_param})
 
+    def set_tool_source(self, name: str, source: str) -> None:
+        """設定工具的來源標記。
+
+        Args:
+            name: 工具名稱
+            source: 來源標記（native / skill / mcp）
+
+        Raises:
+            KeyError: 工具不存在
+        """
+        if name not in self._tools:
+            raise KeyError(f"工具 '{name}' 不存在")
+        self._tools[name].source = source
+
     def list_tools(self) -> list[str]:
         """列出所有已註冊的工具名稱。
 
@@ -87,27 +102,21 @@ class ToolRegistry:
         return list(self._tools.keys())
 
     def get_tool_definitions(self) -> list[dict[str, Any]]:
-        """取得 Claude API 格式的工具定義。
+        """取得 LLM API 格式的工具定義。
+
+        cache_control 等 provider 特定邏輯由 Provider 層處理。
 
         Returns:
-            工具定義列表，符合 Claude API tools 參數格式
+            工具定義列表
         """
-        tools = list(self._tools.values())
-        definitions: list[dict[str, Any]] = []
-
-        for i, tool in enumerate(tools):
-            definition: dict[str, Any] = {
+        return [
+            {
                 'name': tool.name,
                 'description': tool.description,
                 'input_schema': tool.parameters,
             }
-            # 在最後一個工具加上 cache_control，啟用 prompt caching
-            if i == len(tools) - 1:
-                definition['cache_control'] = {'type': 'ephemeral'}
-
-            definitions.append(definition)
-
-        return definitions
+            for tool in self._tools.values()
+        ]
 
     async def execute(self, name: str, arguments: dict[str, Any]) -> Any:
         """執行指定工具。

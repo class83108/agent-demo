@@ -35,24 +35,24 @@ Feature: 基礎聊天功能
 
   Rule: Agent 應正確處理錯誤情況
 
-    Scenario: API 連線失敗
-      Given API 服務無法連線
+    Scenario: Provider 連線失敗
+      Given Provider 服務無法連線
       When 使用者發送訊息
-      Then Agent 應拋出 ConnectionError
+      Then Agent 應拋出 ProviderConnectionError
       And 錯誤訊息應建議使用者稍後重試
       And 對話歷史不應被修改
 
-    Scenario: API 金鑰無效
-      Given API 金鑰設定錯誤
+    Scenario: Provider 認證失敗
+      Given Provider 認證資訊錯誤
       When 使用者發送訊息
-      Then Agent 應拋出 PermissionError
+      Then Agent 應拋出 ProviderAuthError
       And 錯誤訊息應說明如何設定 API 金鑰
       And 對話歷史不應被修改
 
-    Scenario: API 回應超時
-      Given API 回應超過超時閾值
+    Scenario: Provider 回應超時
+      Given Provider 回應超過超時閾值
       When 使用者發送訊息
-      Then Agent 應拋出 TimeoutError
+      Then Agent 應拋出 ProviderTimeoutError
       And 對話歷史不應被修改
 
   Rule: Agent 應支援串流回應

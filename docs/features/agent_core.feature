@@ -77,28 +77,27 @@ Feature: Agent 核心架構
       Then Agent 應回傳錯誤訊息
       And 錯誤訊息應說明工具不存在
 
-  Rule: Agent 應使用 Prompt Caching 優化 API 呼叫
+  Rule: Agent 應透過 Provider 抽象層呼叫 LLM
 
-    Scenario: 在對話歷史最後添加緩存斷點
-      Given Agent 已有對話歷史
-      When Agent 建立 API 請求參數
-      Then 對話歷史的最後一個 message 應包含 cache_control
-      And cache_control 類型應為 ephemeral
+    Scenario: Agent 使用注入的 Provider
+      Given Agent 已配置 AnthropicProvider
+      When 使用者發送訊息
+      Then Agent 應透過 Provider 發送 API 請求
+      And 不應直接使用 anthropic SDK
 
-    Scenario: 不修改原始對話歷史
-      Given Agent 的對話歷史包含 3 則訊息
-      When Agent 建立帶有 cache_control 的 API 請求參數
-      Then 原始對話歷史應保持不變
-      And 原始對話歷史不應包含任何 cache_control
+  Rule: Agent 應整合 Skill 系統
 
-    Scenario: 處理字串類型的 content
-      Given 對話歷史最後一則訊息的 content 是字串
-      When Agent 建立 API 請求參數
-      Then 該 content 應轉換為 text block 格式
-      And text block 應包含 cache_control
+    Scenario: Agent 使用已啟用 Skill 的 System Prompt
+      Given Agent 基礎 prompt 為 "你是助手"
+      And SkillRegistry 包含 Skill "fitness"（instructions 為 "你擅長健身"）
+      And Skill "fitness" 已被啟用
+      When Agent 發送 API 請求
+      Then system prompt 應包含基礎 prompt 與 Skill 描述清單
+      And system prompt 應包含 "fitness" 的完整 instructions
 
-    Scenario: 處理列表類型的 content
-      Given 對話歷史最後一則訊息的 content 是列表
-      When Agent 建立 API 請求參數
-      Then 列表的最後一個 block 應包含 cache_control
-      And 其他 blocks 不應包含 cache_control
+    Scenario: 未啟用的 Skill 不注入完整指令
+      Given Agent 基礎 prompt 為 "你是助手"
+      And SkillRegistry 包含 Skill "fitness" 但未啟用
+      When Agent 發送 API 請求
+      Then system prompt 應包含 Skill 描述清單
+      And system prompt 不應包含 "fitness" 的完整 instructions

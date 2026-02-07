@@ -56,7 +56,7 @@ def sandbox_dir(tmp_path: Path) -> Path:
 @pytest.fixture
 def edit_file(sandbox_dir: Path) -> Any:
     """建立 edit_file 函數，已綁定 sandbox_root。"""
-    from agent_demo.tools.file_edit import edit_file_handler
+    from agent_core.tools.file_edit import edit_file_handler
 
     def _edit(
         path: str,

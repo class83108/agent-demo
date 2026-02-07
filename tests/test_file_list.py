@@ -59,7 +59,7 @@ def sandbox_dir(tmp_path: Path) -> Path:
 @pytest.fixture
 def list_files(sandbox_dir: Path) -> Any:
     """建立 list_files 函數，已綁定 sandbox_root。"""
-    from agent_demo.tools.file_list import list_files_handler
+    from agent_core.tools.file_list import list_files_handler
 
     def _list(
         path: str = '.',

@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from agent_demo.tools.registry import ToolRegistry
-from agent_demo.tools.setup import create_default_registry
+from agent_core.tools.registry import ToolRegistry
+from agent_core.tools.setup import create_default_registry
 
 __all__ = ['ToolRegistry', 'create_default_registry']

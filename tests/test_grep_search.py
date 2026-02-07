@@ -163,7 +163,7 @@ module.exports = { fetchData, ApiClient };
 @pytest.fixture
 def grep_search(sandbox_dir: Path) -> Any:
     """建立 grep_search 函數，已綁定 sandbox_root。"""
-    from agent_demo.tools.grep_search import grep_search_handler
+    from agent_core.tools.grep_search import grep_search_handler
 
     def _search(
         pattern: str,

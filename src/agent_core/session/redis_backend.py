@@ -11,9 +11,8 @@ from typing import Any
 from urllib.parse import urlparse
 
 import redis.asyncio as redis
-from anthropic.types import MessageParam
 
-from agent_demo.usage_monitor import UsageRecord
+from agent_core.usage_monitor import UsageRecord
 
 logger = logging.getLogger(__name__)
 
@@ -58,7 +57,7 @@ class SessionManager:
         """生成使用量統計的 Redis key。"""
         return _USAGE_KEY_TEMPLATE.format(session_id=session_id)
 
-    async def load(self, session_id: str) -> list[MessageParam]:
+    async def load(self, session_id: str) -> list[dict[str, Any]]:
         """從 Redis 讀取對話歷史。
 
         Args:
@@ -72,11 +71,11 @@ class SessionManager:
             logger.debug('會話無歷史記錄', extra={'session_id': session_id})
             return []
 
-        data: list[MessageParam] = json.loads(raw)
+        data: list[dict[str, Any]] = json.loads(raw)
         logger.debug('讀取會話歷史', extra={'session_id': session_id, 'messages': len(data)})
         return data
 
-    async def save(self, session_id: str, conversation: list[MessageParam]) -> None:
+    async def save(self, session_id: str, conversation: list[dict[str, Any]]) -> None:
         """將對話歷史寫入 Redis。
 
         Args:

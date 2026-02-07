@@ -9,12 +9,12 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from agent_demo.tools.bash import bash_handler
-from agent_demo.tools.file_edit import edit_file_handler
-from agent_demo.tools.file_list import list_files_handler
-from agent_demo.tools.file_read import read_file_handler
-from agent_demo.tools.grep_search import grep_search_handler
-from agent_demo.tools.registry import ToolRegistry
+from agent_core.tools.bash import bash_handler
+from agent_core.tools.file_edit import edit_file_handler
+from agent_core.tools.file_list import list_files_handler
+from agent_core.tools.file_read import read_file_handler
+from agent_core.tools.grep_search import grep_search_handler
+from agent_core.tools.registry import ToolRegistry
 
 logger = logging.getLogger(__name__)
 

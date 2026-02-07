@@ -20,7 +20,9 @@ from typing import Any
 
 import pytest
 
-from agent_demo.agent import Agent, AgentConfig
+from agent_core.agent import Agent
+from agent_core.config import AgentCoreConfig
+from agent_core.providers.anthropic_provider import AnthropicProvider
 
 pytestmark = pytest.mark.smoke
 
@@ -40,8 +42,9 @@ class TestPromptCachingSmoke:
         """
         # 使用唯一的 system prompt 確保測試間緩存隔離
         unique_prompt = f'測試專用 Agent - Prompt Caching Test - {time.time()}'
-        config = AgentConfig(system_prompt=unique_prompt)
-        agent = Agent(config=config)
+        config = AgentCoreConfig(system_prompt=unique_prompt)
+        provider = AnthropicProvider(config.provider)
+        agent = Agent(config=config, provider=provider)
 
         # 添加足夠長的內容以觸發緩存（需要 >= 1024 tokens）
         long_context = (
@@ -130,8 +133,9 @@ class TestPromptCachingSmoke:
         """
         # 使用唯一的 system prompt 確保測試間緩存隔離
         unique_prompt = f'測試專用 Agent - Conversation History Test - {time.time()}'
-        config = AgentConfig(system_prompt=unique_prompt)
-        agent = Agent(config=config)
+        config = AgentCoreConfig(system_prompt=unique_prompt)
+        provider = AnthropicProvider(config.provider)
+        agent = Agent(config=config, provider=provider)
 
         # 添加足夠長的內容以觸發緩存
         long_intro = (

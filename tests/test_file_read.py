@@ -60,7 +60,7 @@ def sandbox_dir(tmp_path: Path) -> Path:
 @pytest.fixture
 def read_file(sandbox_dir: Path) -> Any:
     """建立 read_file 函數，已綁定 sandbox_root。"""
-    from agent_demo.tools.file_read import read_file_handler
+    from agent_core.tools.file_read import read_file_handler
 
     def _read(
         path: str,

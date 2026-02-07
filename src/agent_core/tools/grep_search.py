@@ -11,7 +11,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any
 
-from agent_demo.tools.path_utils import (
+from agent_core.tools.path_utils import (
     matches_pattern,
     should_skip_dir,
     should_skip_file,

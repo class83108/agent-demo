@@ -15,8 +15,10 @@ from pathlib import Path
 
 import pytest
 
-from agent_demo.agent import Agent, AgentConfig
-from agent_demo.tools.setup import create_default_registry
+from agent_core.agent import Agent
+from agent_core.config import AgentCoreConfig
+from agent_core.providers.anthropic_provider import AnthropicProvider
+from agent_core.tools.setup import create_default_registry
 
 pytestmark = pytest.mark.smoke
 
@@ -43,8 +45,11 @@ class TestSmokeFileEdit:
         """驗證 Agent 能調用 edit_file 工具並修改檔案內容。"""
         registry = create_default_registry(sandbox_dir)
         prompt = '你是程式開發助手。當被要求編輯檔案時，請使用 edit_file 工具。'
+        config = AgentCoreConfig(system_prompt=prompt)
+        provider = AnthropicProvider(config.provider)
         agent = Agent(
-            config=AgentConfig(system_prompt=prompt),
+            config=config,
+            provider=provider,
             tool_registry=registry,
         )
 
@@ -72,8 +77,11 @@ class TestSmokeFileEdit:
         """驗證 Agent 能建立新檔案。"""
         registry = create_default_registry(sandbox_dir)
         prompt = '你是程式開發助手。當被要求建立檔案時，請使用 edit_file 工具。'
+        config = AgentCoreConfig(system_prompt=prompt)
+        provider = AnthropicProvider(config.provider)
         agent = Agent(
-            config=AgentConfig(system_prompt=prompt),
+            config=config,
+            provider=provider,
             tool_registry=registry,
         )
 

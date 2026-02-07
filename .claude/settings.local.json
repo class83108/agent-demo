@@ -5,7 +5,10 @@
       "Bash(uv run ruff check:*)",
       "Bash(uv run pyright:*)",
       "WebFetch(domain:platform.openai.com)",
-      "WebFetch(domain:claude.com)"
+      "WebFetch(domain:claude.com)",
+      "Bash(ls:*)",
+      "Bash(git mv:*)",
+      "Bash(xargs perl:*)"
     ]
   }
 }

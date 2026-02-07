@@ -9,7 +9,7 @@ import logging
 from pathlib import Path
 from typing import Any
 
-from agent_demo.tools.path_utils import validate_path as validate_path_base
+from agent_core.tools.path_utils import validate_path as validate_path_base
 
 logger = logging.getLogger(__name__)
 

@@ -20,7 +20,7 @@ import pytest
 @pytest.fixture
 def registry() -> Any:
     """建立測試用 Tool Registry。"""
-    from agent_demo.tools.registry import ToolRegistry
+    from agent_core.tools.registry import ToolRegistry
 
     return ToolRegistry()
 
@@ -175,7 +175,7 @@ class TestFileLocking:
         When 執行該工具
         Then 應先取得鎖，執行完成後釋放鎖
         """
-        from agent_demo.tools.registry import ToolRegistry
+        from agent_core.tools.registry import ToolRegistry
 
         # Arrange
         mock_lock = MockLockProvider()
@@ -206,7 +206,7 @@ class TestFileLocking:
         When 執行該工具
         Then 不應嘗試取得任何鎖
         """
-        from agent_demo.tools.registry import ToolRegistry
+        from agent_core.tools.registry import ToolRegistry
 
         # Arrange
         mock_lock = MockLockProvider()
@@ -231,7 +231,7 @@ class TestFileLocking:
         When 並行執行這兩個工具
         Then 事件順序應為 acquire → release → acquire → release
         """
-        from agent_demo.tools.registry import ToolRegistry
+        from agent_core.tools.registry import ToolRegistry
 
         # Arrange
         mock_lock = MockLockProvider()
@@ -272,7 +272,7 @@ class TestFileLocking:
         When 並行執行這兩個工具
         Then 兩個檔案的 acquire 可以在任一 release 之前發生
         """
-        from agent_demo.tools.registry import ToolRegistry
+        from agent_core.tools.registry import ToolRegistry
 
         # Arrange
         mock_lock = MockLockProvider()

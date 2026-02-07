@@ -13,7 +13,7 @@ import shutil
 from pathlib import Path
 from typing import Any
 
-from agent_demo.tools.path_utils import validate_path
+from agent_core.tools.path_utils import validate_path
 
 logger = logging.getLogger(__name__)
 

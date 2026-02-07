@@ -15,9 +15,18 @@ from __future__ import annotations
 
 import pytest
 
-from agent_demo.agent import Agent
+from agent_core.agent import Agent
+from agent_core.config import AgentCoreConfig
+from agent_core.providers.anthropic_provider import AnthropicProvider
 
 pytestmark = pytest.mark.smoke
+
+
+def _make_agent() -> Agent:
+    """建立使用真實 API 的 Agent。"""
+    config = AgentCoreConfig()
+    provider = AnthropicProvider(config.provider)
+    return Agent(config=config, provider=provider)
 
 
 class TestSmoke:
@@ -25,7 +34,7 @@ class TestSmoke:
 
     async def test_agent_can_respond(self) -> None:
         """驗證 Agent 能成功發送訊息並收到回應。"""
-        agent = Agent()
+        agent = _make_agent()
 
         chunks: list[str] = []
         async for chunk in agent.stream_message('請回答 "OK"'):
@@ -38,7 +47,7 @@ class TestSmoke:
 
     async def test_conversation_history_works(self) -> None:
         """驗證多輪對話歷史正確維護。"""
-        agent = Agent()
+        agent = _make_agent()
 
         # 第一輪
         async for _ in agent.stream_message('我的名字是小明'):
@@ -58,7 +67,7 @@ class TestSmoke:
 
     async def test_stream_receives_multiple_chunks(self) -> None:
         """驗證串流確實分多次回傳。"""
-        agent = Agent()
+        agent = _make_agent()
 
         chunks: list[str] = []
         async for chunk in agent.stream_message('請用 50 個字介紹 Python'):

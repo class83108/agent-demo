@@ -54,7 +54,7 @@ def sandbox_dir(tmp_path: Path) -> Path:
 @pytest.fixture
 def bash_handler_fn(sandbox_dir: Path) -> Any:
     """建立 bash_handler 函數，已綁定 sandbox_root。"""
-    from agent_demo.tools.bash import bash_handler
+    from agent_core.tools.bash import bash_handler
 
     def _bash(
         command: str,
@@ -398,4 +398,4 @@ class TestEnvironment:
         assert 'new_file.txt' in result['stdout']
         # 不應提及 sandbox 外的檔案（例如專案根目錄的檔案）
         # 驗證方式：git status 輸出應只包含 sandbox 相對路徑
-        assert 'agent_demo' not in result['stdout']  # 專案目錄名稱不應出現
+        assert 'agent_core' not in result['stdout']  # 專案目錄名稱不應出現
