@@ -127,6 +127,15 @@ class Agent:
             }
         return tool_result, event
 
+    def _record_usage(self, final_message: Any) -> None:
+        """記錄 API 使用量（若有監控器且回應含 usage 資訊）。"""
+        if self.usage_monitor and final_message.usage:
+            self.usage_monitor.record(final_message.usage)
+
+    def _has_tool_calls(self, final_message: Any) -> bool:
+        """判斷回應是否包含工具調用。"""
+        return final_message.stop_reason == 'tool_use' and self.tool_registry is not None
+
     def _handle_stream_interruption(self, response_parts: list[str]) -> None:
         """處理串流中斷時的回應保留邏輯。"""
         if response_parts:
@@ -172,14 +181,11 @@ class Agent:
 
                     final_message = await result.get_final_result()
 
-                # 記錄 API 使用量
-                if self.usage_monitor and final_message.usage:
-                    self.usage_monitor.record(final_message.usage)
-
+                self._record_usage(final_message)
                 self.conversation.append({'role': 'assistant', 'content': final_message.content})
 
                 # 若無工具調用，結束迴圈
-                if final_message.stop_reason != 'tool_use' or not self.tool_registry:
+                if not self._has_tool_calls(final_message):
                     logger.debug(
                         '串流回應完成',
                         extra={'response_length': len(''.join(response_parts))},
