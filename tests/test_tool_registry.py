@@ -165,6 +165,46 @@ async def sample_file_tool(path: str) -> str:
     return f'操作完成: {path}'
 
 
+class TestToolSummaries:
+    """測試工具摘要查詢功能。"""
+
+    def test_get_tool_summaries_empty(self, registry: Any) -> None:
+        """空的 registry 應回傳空列表。"""
+        assert registry.get_tool_summaries() == []
+
+    def test_get_tool_summaries_returns_name_description_source(self, registry: Any) -> None:
+        """摘要應包含 name、description、source。"""
+        registry.register(
+            name='read_file',
+            description='讀取檔案內容',
+            parameters={'type': 'object', 'properties': {}},
+            handler=sample_read_file,
+        )
+
+        summaries = registry.get_tool_summaries()
+
+        assert len(summaries) == 1
+        assert summaries[0] == {
+            'name': 'read_file',
+            'description': '讀取檔案內容',
+            'source': 'native',
+        }
+
+    def test_get_tool_summaries_reflects_source_change(self, registry: Any) -> None:
+        """修改 source 後摘要應反映變更。"""
+        registry.register(
+            name='mcp_tool',
+            description='MCP 工具',
+            parameters={'type': 'object', 'properties': {}},
+            handler=sample_read_file,
+        )
+        registry.set_tool_source('mcp_tool', 'mcp')
+
+        summaries = registry.get_tool_summaries()
+
+        assert summaries[0]['source'] == 'mcp'
+
+
 class TestFileLocking:
     """測試檔案鎖定機制，避免競爭條件。"""
 

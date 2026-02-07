@@ -564,6 +564,101 @@ class TestChatHistory:
         assert messages[2]['content'] == '這個檔案包含一個test 函數'
 
 
+STATUS_URL = '/api/agent/status'
+
+
+class TestAgentStatus:
+    """測試 Agent 配置狀態端點 — GET /api/agent/status"""
+
+    @pytest.mark.asyncio
+    async def test_status_returns_model_and_max_tokens(self) -> None:
+        """應回傳目前的 model 名稱與 max_tokens。"""
+        async with AsyncClient(transport=ASGITransport(app=app), base_url='http://test') as client:
+            response = await client.get(STATUS_URL)
+
+        assert response.status_code == 200
+        data = response.json()
+        assert 'model' in data
+        assert 'max_tokens' in data
+        assert isinstance(data['model'], str)
+        assert isinstance(data['max_tokens'], int)
+
+    @pytest.mark.asyncio
+    async def test_status_returns_tools_list(self) -> None:
+        """應回傳工具清單（含 source）。"""
+        from agent_core.tools.registry import ToolRegistry
+
+        mock_registry = ToolRegistry()
+        mock_registry.register(
+            name='test_tool',
+            description='測試工具',
+            parameters={'type': 'object', 'properties': {}},
+            handler=lambda: 'ok',
+        )
+
+        with patch('agent_core.main.tool_registry', mock_registry):
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url='http://test'
+            ) as client:
+                response = await client.get(STATUS_URL)
+
+        data = response.json()
+        assert 'tools' in data
+        assert len(data['tools']) == 1
+        assert data['tools'][0]['name'] == 'test_tool'
+        assert data['tools'][0]['source'] == 'native'
+
+    @pytest.mark.asyncio
+    async def test_status_returns_skills_info(self) -> None:
+        """應回傳技能註冊與啟用狀態。"""
+        from agent_core.skills.base import Skill
+        from agent_core.skills.registry import SkillRegistry
+
+        mock_skills = SkillRegistry()
+        mock_skills.register(
+            Skill(
+                name='code_review',
+                description='程式碼審查',
+                instructions='...',
+            )
+        )
+        mock_skills.register(
+            Skill(
+                name='tdd',
+                description='測試驅動開發',
+                instructions='...',
+            )
+        )
+        mock_skills.activate('code_review')
+
+        with patch('agent_core.main.skill_registry', mock_skills):
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url='http://test'
+            ) as client:
+                response = await client.get(STATUS_URL)
+
+        data = response.json()
+        assert 'skills' in data
+        assert set(data['skills']['registered']) == {'code_review', 'tdd'}
+        assert data['skills']['active'] == ['code_review']
+
+    @pytest.mark.asyncio
+    async def test_status_with_no_registries(self) -> None:
+        """registry 為 None 時應回傳空列表。"""
+        with (
+            patch('agent_core.main.tool_registry', None),
+            patch('agent_core.main.skill_registry', None),
+        ):
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url='http://test'
+            ) as client:
+                response = await client.get(STATUS_URL)
+
+        data = response.json()
+        assert data['tools'] == []
+        assert data['skills'] == {'registered': [], 'active': []}
+
+
 class TestFileEventStreaming:
     """測試檔案事件 SSE 推送 — 對應 Rule: 工具執行時應推送 SSE 事件"""
 

@@ -20,6 +20,8 @@ from agent_core.providers.exceptions import (
     ProviderConnectionError,
     ProviderTimeoutError,
 )
+from agent_core.skills.base import Skill
+from agent_core.skills.registry import SkillRegistry
 from agent_core.tools.registry import ToolRegistry
 
 # =============================================================================
@@ -566,3 +568,98 @@ class TestProviderIntegration:
         assert tools is not None
         assert len(tools) == 1
         assert tools[0]['name'] == 'test_tool'
+
+
+# =============================================================================
+# Rule: Agent 應支援 SkillRegistry 動態組合 system prompt
+# =============================================================================
+
+
+class TestSkillRegistryIntegration:
+    """測試 Agent 與 SkillRegistry 的整合。"""
+
+    async def test_agent_without_skill_registry_uses_base_prompt(self) -> None:
+        """無 SkillRegistry 時使用原始 system prompt。"""
+        provider = MockProvider([(['回應'], _make_final_message('回應'))])
+        agent = _make_agent(provider, system_prompt='基礎 prompt')
+
+        await collect_stream(agent, '測試')
+
+        assert provider.call_args_list[0]['system'] == '基礎 prompt'
+
+    async def test_agent_with_empty_skill_registry_uses_base_prompt(self) -> None:
+        """SkillRegistry 為空時使用原始 system prompt。"""
+        provider = MockProvider([(['回應'], _make_final_message('回應'))])
+        config = AgentCoreConfig(
+            provider=ProviderConfig(api_key='sk-test'),
+            system_prompt='基礎 prompt',
+        )
+        skill_registry = SkillRegistry()
+        agent = Agent(
+            config=config,
+            provider=provider,
+            skill_registry=skill_registry,
+        )
+
+        await collect_stream(agent, '測試')
+
+        assert provider.call_args_list[0]['system'] == '基礎 prompt'
+
+    async def test_agent_with_registered_skill_includes_description(self) -> None:
+        """已註冊的 Skill 描述應出現在 system prompt（Phase 1）。"""
+        provider = MockProvider([(['回應'], _make_final_message('回應'))])
+        config = AgentCoreConfig(
+            provider=ProviderConfig(api_key='sk-test'),
+            system_prompt='基礎 prompt',
+        )
+        skill_registry = SkillRegistry()
+        skill_registry.register(
+            Skill(
+                name='code_review',
+                description='程式碼審查',
+                instructions='詳細審查指令...',
+            )
+        )
+        agent = Agent(
+            config=config,
+            provider=provider,
+            skill_registry=skill_registry,
+        )
+
+        await collect_stream(agent, '測試')
+
+        system = provider.call_args_list[0]['system']
+        assert '基礎 prompt' in system
+        assert 'code_review' in system
+        assert '程式碼審查' in system
+        # Phase 2 未啟用，不應包含完整 instructions
+        assert '詳細審查指令' not in system
+
+    async def test_agent_with_active_skill_includes_instructions(self) -> None:
+        """啟用的 Skill 應注入完整 instructions（Phase 2）。"""
+        provider = MockProvider([(['回應'], _make_final_message('回應'))])
+        config = AgentCoreConfig(
+            provider=ProviderConfig(api_key='sk-test'),
+            system_prompt='基礎 prompt',
+        )
+        skill_registry = SkillRegistry()
+        skill_registry.register(
+            Skill(
+                name='code_review',
+                description='程式碼審查',
+                instructions='詳細審查指令...',
+            )
+        )
+        skill_registry.activate('code_review')
+        agent = Agent(
+            config=config,
+            provider=provider,
+            skill_registry=skill_registry,
+        )
+
+        await collect_stream(agent, '測試')
+
+        system = provider.call_args_list[0]['system']
+        assert '基礎 prompt' in system
+        assert '程式碼審查' in system
+        assert '詳細審查指令' in system

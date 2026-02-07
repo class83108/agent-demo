@@ -24,6 +24,7 @@ from agent_core.agent import Agent
 from agent_core.config import AgentCoreConfig
 from agent_core.providers.anthropic_provider import AnthropicProvider
 from agent_core.session import SessionManager
+from agent_core.skills.registry import SkillRegistry
 from agent_core.tools.file_read import detect_language, read_file_handler
 from agent_core.tools.registry import ToolRegistry
 from agent_core.tools.setup import create_default_registry
@@ -43,18 +44,20 @@ IS_PRODUCTION = os.environ.get('ENV') == 'production'
 # --- 全局單例 ---
 session_manager = SessionManager(redis_url=REDIS_URL)
 tool_registry: ToolRegistry | None = None
+skill_registry: SkillRegistry | None = None
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     """應用程序生命週期管理。"""
-    global tool_registry
+    global tool_registry, skill_registry
 
     logger.info('應用程序啟動')
 
-    # 啟動時建立一次工具註冊表
+    # 啟動時建立工具註冊表與技能註冊表
     sandbox_root = Path(SANDBOX_DIR)
     tool_registry = create_default_registry(sandbox_root)
+    skill_registry = SkillRegistry()
 
     yield
 
@@ -232,10 +235,15 @@ async def _stream_chat(
     conversation = await session_manager.load(session_id)
     usage_data = await session_manager.load_usage(session_id)
 
-    # 建立 Agent（使用全局工具註冊表，帶入歷史）
+    # 建立 Agent（使用全局工具與技能註冊表，帶入歷史）
     config = AgentCoreConfig()
     provider = AnthropicProvider(config.provider)
-    agent = Agent(config=config, provider=provider, tool_registry=tool_registry)
+    agent = Agent(
+        config=config,
+        provider=provider,
+        tool_registry=tool_registry,
+        skill_registry=skill_registry,
+    )
     agent.conversation = list(conversation)
 
     # 載入歷史使用量統計
@@ -400,6 +408,40 @@ async def chat_usage_reset(
 
     await session_manager.reset_usage(session_id)
     return JSONResponse({'status': 'ok', 'message': '使用量統計已重設'})
+
+
+@app.get('/api/agent/status')
+async def agent_status() -> JSONResponse:
+    """查詢 Agent 配置狀態端點。
+
+    回傳目前的 model、工具清單（含來源）、技能清單（含啟用狀態）。
+
+    Returns:
+        Agent 配置狀態
+    """
+    config = AgentCoreConfig()
+
+    # 工具摘要
+    tools: list[dict[str, str]] = []
+    if tool_registry:
+        tools = tool_registry.get_tool_summaries()
+
+    # 技能摘要
+    skills: dict[str, list[str]] = {'registered': [], 'active': []}
+    if skill_registry:
+        skills = {
+            'registered': skill_registry.list_skills(),
+            'active': skill_registry.list_active_skills(),
+        }
+
+    return JSONResponse(
+        {
+            'model': config.provider.model,
+            'max_tokens': config.provider.max_tokens,
+            'tools': tools,
+            'skills': skills,
+        }
+    )
 
 
 @app.get('/health')

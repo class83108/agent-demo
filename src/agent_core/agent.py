@@ -19,6 +19,7 @@ from agent_core.providers.exceptions import (
     ProviderConnectionError,
     ProviderTimeoutError,
 )
+from agent_core.skills.registry import SkillRegistry
 from agent_core.tools.registry import ToolRegistry
 from agent_core.usage_monitor import UsageMonitor
 
@@ -44,6 +45,7 @@ class Agent:
     provider: LLMProvider
     conversation: list[dict[str, Any]] = field(default_factory=lambda: [])
     tool_registry: ToolRegistry | None = None
+    skill_registry: SkillRegistry | None = None
     usage_monitor: UsageMonitor | None = field(default_factory=UsageMonitor)
 
     def __post_init__(self) -> None:
@@ -76,8 +78,13 @@ class Agent:
 
         try:
             while True:
-                # 準備 API 參數
-                system = self.config.system_prompt
+                # 準備 API 參數（透過 SkillRegistry 動態組合 system prompt）
+                if self.skill_registry:
+                    system = self.skill_registry.get_combined_system_prompt(
+                        self.config.system_prompt
+                    )
+                else:
+                    system = self.config.system_prompt
                 tools = self.tool_registry.get_tool_definitions() if self.tool_registry else None
 
                 async with self.provider.stream(

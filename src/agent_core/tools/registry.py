@@ -101,6 +101,17 @@ class ToolRegistry:
         """
         return list(self._tools.keys())
 
+    def get_tool_summaries(self) -> list[dict[str, str]]:
+        """取得所有工具的摘要資訊（含來源標記）。
+
+        Returns:
+            工具摘要列表，每項包含 name、description、source
+        """
+        return [
+            {'name': t.name, 'description': t.description, 'source': t.source}
+            for t in self._tools.values()
+        ]
+
     def get_tool_definitions(self) -> list[dict[str, Any]]:
         """取得 LLM API 格式的工具定義。
 
