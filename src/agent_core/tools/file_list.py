@@ -92,6 +92,31 @@ def _list_directory(
     return sorted(files), sorted(directories)
 
 
+def _should_recurse_dir(
+    dir_name: str,
+    show_hidden: bool,
+    exclude_set: set[str],
+    max_depth: int | None,
+    current_depth: int,
+) -> bool:
+    """判斷是否應遞迴進入子目錄。"""
+    if dir_name in exclude_set:
+        return False
+    if not show_hidden and dir_name.startswith('.'):
+        return False
+    if max_depth is not None and current_depth >= max_depth:
+        return False
+    return True
+
+
+def _get_relative_path(item: Path, sandbox_root: Path) -> str | None:
+    """計算相對路徑，若不在 sandbox 內則回傳 None。"""
+    try:
+        return str(item.relative_to(sandbox_root))
+    except ValueError:
+        return None
+
+
 def _list_recursive(
     dir_path: Path,
     sandbox_root: Path,
@@ -120,28 +145,15 @@ def _list_recursive(
 
     try:
         for item in dir_path.iterdir():
-            # 計算相對路徑
-            try:
-                rel_path = item.relative_to(sandbox_root)
-            except ValueError:
+            rel_path = _get_relative_path(item, sandbox_root)
+            if rel_path is None:
                 continue
 
-            if item.is_file():
-                if _should_include_file(item.name, show_hidden, pattern):
-                    all_files.append(str(rel_path))
-            elif item.is_dir():
-                # 檢查是否應排除
-                if item.name in exclude_set:
-                    continue
-                # 檢查隱藏目錄
-                if not show_hidden and item.name.startswith('.'):
-                    continue
-
-                # 檢查深度限制（是否可以繼續遞迴）
-                if max_depth is not None and current_depth >= max_depth:
-                    continue
-
-                # 遞迴處理子目錄
+            if item.is_file() and _should_include_file(item.name, show_hidden, pattern):
+                all_files.append(rel_path)
+            elif item.is_dir() and _should_recurse_dir(
+                item.name, show_hidden, exclude_set, max_depth, current_depth
+            ):
                 sub_files = _list_recursive(
                     item,
                     sandbox_root,

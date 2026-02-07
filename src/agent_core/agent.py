@@ -60,6 +60,85 @@ class Agent:
         self.conversation = []
         logger.debug('對話歷史已重設')
 
+    def _get_system_prompt(self) -> str:
+        """取得合併後的 system prompt。"""
+        if self.skill_registry:
+            return self.skill_registry.get_combined_system_prompt(self.config.system_prompt)
+        return self.config.system_prompt
+
+    async def _execute_single_tool(
+        self,
+        tool_block: dict[str, Any],
+    ) -> tuple[Any, Exception | None]:
+        """執行單一工具，回傳 (結果, 錯誤)。"""
+        try:
+            res = await self.tool_registry.execute(  # type: ignore[union-attr]
+                tool_block['name'],
+                tool_block['input'],
+            )
+            return (res, None)
+        except Exception as exc:
+            return (None, exc)
+
+    def _build_tool_result_entry(
+        self,
+        block: dict[str, Any],
+        result_val: Any,
+        error: Exception | None,
+    ) -> tuple[dict[str, Any], dict[str, Any]]:
+        """建立單一工具的結果與事件通知。
+
+        Returns:
+            (tool_result, event) 的 tuple
+        """
+        if error is None:
+            result_content = (
+                json.dumps(result_val, ensure_ascii=False)
+                if isinstance(result_val, dict)
+                else str(result_val)
+            )
+            tool_result = {
+                'type': 'tool_result',
+                'tool_use_id': block['id'],
+                'content': result_content,
+            }
+            event = {
+                'type': 'tool_call',
+                'data': {'name': block['name'], 'status': 'completed'},
+            }
+        else:
+            logger.warning(
+                '工具執行失敗',
+                extra={'tool_name': block['name'], 'error': str(error)},
+            )
+            tool_result = {
+                'type': 'tool_result',
+                'tool_use_id': block['id'],
+                'content': str(error),
+                'is_error': True,
+            }
+            event = {
+                'type': 'tool_call',
+                'data': {
+                    'name': block['name'],
+                    'status': 'failed',
+                    'error': str(error),
+                },
+            }
+        return tool_result, event
+
+    def _handle_stream_interruption(self, response_parts: list[str]) -> None:
+        """處理串流中斷時的回應保留邏輯。"""
+        if response_parts:
+            partial = ''.join(response_parts)
+            self.conversation.append({'role': 'assistant', 'content': partial})
+            logger.warning(
+                '串流中斷，已保留部分回應',
+                extra={'partial_length': len(partial)},
+            )
+        else:
+            self.conversation.pop()
+
     async def _stream_with_tool_loop(
         self,
     ) -> AsyncIterator[str | dict[str, Any]]:
@@ -78,13 +157,7 @@ class Agent:
 
         try:
             while True:
-                # 準備 API 參數（透過 SkillRegistry 動態組合 system prompt）
-                if self.skill_registry:
-                    system = self.skill_registry.get_combined_system_prompt(
-                        self.config.system_prompt
-                    )
-                else:
-                    system = self.config.system_prompt
+                system = self._get_system_prompt()
                 tools = self.tool_registry.get_tool_definitions() if self.tool_registry else None
 
                 async with self.provider.stream(
@@ -103,13 +176,7 @@ class Agent:
                 if self.usage_monitor and final_message.usage:
                     self.usage_monitor.record(final_message.usage)
 
-                # 將 assistant 回應加入對話歷史
-                self.conversation.append(
-                    {
-                        'role': 'assistant',
-                        'content': final_message.content,
-                    }
-                )
+                self.conversation.append({'role': 'assistant', 'content': final_message.content})
 
                 # 若無工具調用，結束迴圈
                 if final_message.stop_reason != 'tool_use' or not self.tool_registry:
@@ -119,14 +186,12 @@ class Agent:
                     )
                     break
 
-                # 標記 preamble 結束（僅在有文字時）
                 if response_parts:
                     yield {'type': 'preamble_end', 'data': {}}
 
-                # 收集所有工具調用區塊
+                # 收集並執行所有工具調用
                 tool_use_blocks = [b for b in final_message.content if b.get('type') == 'tool_use']
 
-                # 先通知前端所有工具開始執行
                 for block in tool_use_blocks:
                     logger.info(
                         '執行工具',
@@ -134,102 +199,32 @@ class Agent:
                     )
                     yield {
                         'type': 'tool_call',
-                        'data': {
-                            'name': block['name'],
-                            'status': 'started',
-                        },
+                        'data': {'name': block['name'], 'status': 'started'},
                     }
 
-                # 並行執行所有工具
-                async def _run_tool(
-                    tool_block: dict[str, Any],
-                ) -> tuple[Any, Exception | None]:
-                    """執行單一工具，回傳 (結果, 錯誤)。"""
-                    try:
-                        res = await self.tool_registry.execute(  # type: ignore[union-attr]
-                            tool_block['name'],
-                            tool_block['input'],
-                        )
-                        return (res, None)
-                    except Exception as exc:
-                        return (None, exc)
-
-                exec_results = await asyncio.gather(*[_run_tool(b) for b in tool_use_blocks])
+                exec_results = await asyncio.gather(
+                    *[self._execute_single_tool(b) for b in tool_use_blocks]
+                )
 
                 # 收集結果並通知前端完成狀態
                 tool_results: list[dict[str, Any]] = []
                 for block, (result_val, error) in zip(tool_use_blocks, exec_results):
-                    if error is None:
-                        result_content = (
-                            json.dumps(result_val, ensure_ascii=False)
-                            if isinstance(result_val, dict)
-                            else str(result_val)
-                        )
-                        tool_results.append(
-                            {
-                                'type': 'tool_result',
-                                'tool_use_id': block['id'],
-                                'content': result_content,
-                            }
-                        )
-                        yield {
-                            'type': 'tool_call',
-                            'data': {
-                                'name': block['name'],
-                                'status': 'completed',
-                            },
-                        }
-                    else:
-                        logger.warning(
-                            '工具執行失敗',
-                            extra={'tool_name': block['name'], 'error': str(error)},
-                        )
-                        tool_results.append(
-                            {
-                                'type': 'tool_result',
-                                'tool_use_id': block['id'],
-                                'content': str(error),
-                                'is_error': True,
-                            }
-                        )
-                        yield {
-                            'type': 'tool_call',
-                            'data': {
-                                'name': block['name'],
-                                'status': 'failed',
-                                'error': str(error),
-                            },
-                        }
+                    tool_result, event = self._build_tool_result_entry(block, result_val, error)
+                    tool_results.append(tool_result)
+                    yield event
 
-                self.conversation.append(
-                    {
-                        'role': 'user',
-                        'content': tool_results,
-                    }
-                )
+                self.conversation.append({'role': 'user', 'content': tool_results})
                 logger.debug(
                     '工具結果已回傳，繼續對話',
                     extra={'tool_count': len(tool_results)},
                 )
-
-                # 重置 response_parts 以收集下一輪串流
                 response_parts = []
 
         except ProviderAuthError:
-            # 認證失敗：移除剛加入的 user message
             self.conversation.pop()
             raise
         except (ProviderConnectionError, ProviderTimeoutError):
-            # 連線/超時：保留部分回應（如果有的話）
-            if response_parts:
-                partial = ''.join(response_parts)
-                self.conversation.append({'role': 'assistant', 'content': partial})
-                logger.warning(
-                    '串流中斷，已保留部分回應',
-                    extra={'partial_length': len(partial)},
-                )
-            else:
-                self.conversation.pop()
+            self._handle_stream_interruption(response_parts)
             raise
 
     async def stream_message(

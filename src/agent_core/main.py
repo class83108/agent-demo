@@ -164,6 +164,38 @@ def _sse_event(event: str, data: Any) -> str:
     return f'event: {event}\ndata: {encoded_data}\n\n'
 
 
+def _get_tool_result_blocks(msg: dict[str, Any]) -> list[dict[str, Any]]:
+    """從 user 訊息中提取 tool_result 區塊。"""
+    if msg.get('role') != 'user':
+        return []
+    content = msg.get('content', [])
+    if not isinstance(content, list):
+        return []
+    blocks: list[dict[str, Any]] = []
+    for item in cast(list[Any], content):
+        if not isinstance(item, dict):
+            continue
+        block = cast(dict[str, Any], item)
+        if block.get('type') == 'tool_result':
+            blocks.append(block)
+    return blocks
+
+
+def _extract_events_from_tool_content(tool_content: str) -> list[dict[str, Any]]:
+    """從 tool_result 的 content 字串中解析 SSE 事件。"""
+    try:
+        result_data = json.loads(tool_content)
+    except json.JSONDecodeError:
+        return []
+    if not isinstance(result_data, dict):
+        return []
+    result_dict = cast(dict[str, Any], result_data)
+    sse_events = result_dict.get('sse_events')
+    if not isinstance(sse_events, list):
+        return []
+    return cast(list[dict[str, Any]], sse_events)
+
+
 def _extract_sse_events(conversation: list[Any]) -> list[dict[str, Any]]:
     """從對話歷史中提取工具回傳的 SSE 事件。
 
@@ -174,46 +206,9 @@ def _extract_sse_events(conversation: list[Any]) -> list[dict[str, Any]]:
         SSE 事件列表
     """
     events: list[dict[str, Any]] = []
-
     for msg in conversation:
-        # 只處理 user role 的訊息（tool_result 在 user 訊息中）
-        if msg.get('role') != 'user':
-            continue
-
-        content = msg.get('content', [])
-        if not isinstance(content, list):
-            continue
-
-        # 轉換為明確型別的列表
-        content_blocks = cast(list[Any], content)
-
-        # 檢查每個 content block
-        for item in content_blocks:
-            if not isinstance(item, dict):
-                continue
-
-            block = cast(dict[str, Any], item)
-
-            # 只處理 tool_result
-            if block.get('type') != 'tool_result':
-                continue
-
-            # 嘗試解析 tool_result 的 content（可能是 JSON）
-            tool_content = block.get('content', '')
-            if not isinstance(tool_content, str):
-                continue
-
-            try:
-                result_data = json.loads(tool_content)
-                if isinstance(result_data, dict) and 'sse_events' in result_data:
-                    if isinstance(result_data['sse_events'], list):
-                        # 確保每個事件都是 dict
-                        typed_events = cast(list[dict[str, Any]], result_data['sse_events'])
-                        events.extend(typed_events)
-            except json.JSONDecodeError:
-                # content 不是 JSON，跳過
-                continue
-
+        for block in _get_tool_result_blocks(msg):
+            events.extend(_extract_events_from_tool_content(block.get('content', '')))
     return events
 
 
