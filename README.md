@@ -1,214 +1,389 @@
-# Agent Demo
+# Agent Core
 
-一個基於 Claude 的 Coding Agent 展示專案，具備工具調用、即時串流回應與沙箱安全機制。
+可擴充的 AI Agent 核心框架。透過 API 直接與 Claude 互動，自由組裝 Tools、Skills、MCP 來打造你自己的 Agent。
 
-## 核心特色
+## 為什麼選擇 Agent Core？
 
-### Agent 能力
-
-- **工具調用** — 內建 5 種開發工具（檔案讀寫、目錄瀏覽、程式碼搜尋、Bash 執行），每個工具皆有清楚的描述定義，讓 Agent 精準判斷使用時機
-- **平行工具執行** — 透過 `asyncio.gather()` 同時執行多個獨立工具，提升回應效率
-- **安全限制** — 路徑穿越防護、危險指令阻擋（`rm -rf`、`sudo` 等）、敏感檔案保護（`.env`、私鑰）、輸出內容自動遮蔽 API Key
-
-### Token 利用率
-
-- **Prompt Caching** — System prompt、工具定義與對話歷史皆標記 `cache_control: ephemeral`，快取命中時成本降至 0.1 倍
-
-### UX 提升
-
-- **串流模式** — 透過 SSE（Server-Sent Events）逐 token 即時回傳，搭配 Markdown 渲染與程式碼語法高亮
-- **工具執行狀態提示** — 前端即時顯示工具的開始、完成、失敗狀態
-- **即時檔案預覽** — Agent 編輯檔案時，前端即時顯示 diff 變更
-
-### 監控
-
-- **Token 使用量追蹤** — 記錄每次請求的 input/output tokens、快取命中率與成本估算
-
-### 開發中功能
-
-- [ ] **Compact** — 對話壓縮功能，降低長對話的 token 消耗
-- [ ] **Resume** — 斷線復原架構，客戶端掛掉後可接續上次生成到一半的內容
-
-## 開發流程
-
-本專案採用 **Gherkin 驅動的 TDD 開發流程**，確保每個功能從規格定義到實作皆有明確的驗證依據。
-
-### 1. 撰寫 Gherkin Feature 規格
-
-每個功能在動手寫程式前，先以 Gherkin 語法定義使用情境，放置於 `docs/features/*.feature`。Feature 描述的是 **domain level 的行為**，而非技術實作細節。
-
-```gherkin
-# language: zh-TW
-Feature: 讀取檔案功能
-  作為使用者
-  我想要讓 Agent 讀取檔案內容
-  以便 Agent 能理解我的程式碼並提供協助
-
-  Rule: Agent 應處理檔案路徑安全性
-
-    Scenario: 阻擋路徑穿越攻擊
-      Given 工作目錄為 "/project"
-      When 使用者要求讀取 "../../../etc/passwd"
-      Then Agent 應拒絕讀取工作目錄外的檔案
-      And Agent 應回傳安全性錯誤訊息
-```
-
-目前已有的 Feature 規格：
-
-| Feature 檔案 | 涵蓋範圍 |
-|---|---|
-| `agent_core.feature` | Agent 迴圈、平行工具執行、Prompt Caching |
-| `chat.feature` | 對話功能、上下文記憶 |
-| `chat_api.feature` | REST API 端點行為 |
-| `file_read.feature` | 檔案讀取、安全性防護 |
-| `file_edit.feature` | 檔案編輯、原子寫入 |
-| `file_list.feature` | 目錄瀏覽 |
-| `code_search.feature` | 程式碼搜尋 |
-| `bash.feature` | Bash 指令執行、危險指令阻擋 |
-| `tool_status.feature` | 工具執行狀態通知 |
-| `live_file_preview.feature` | 即時檔案預覽 |
-
-### 2. 紅燈：撰寫 Unit Test
-
-根據 Feature 中的 Scenario 撰寫對應的測試案例（`tests/test_*.py`），測試必須先失敗（紅燈）。
-
-```bash
-uv run pytest  # 預期失敗
-```
-
-### 3. 綠燈：實作功能
-
-撰寫最小可行程式碼讓測試通過，接著重構優化。
-
-```bash
-uv run pytest  # 預期通過
-```
-
-### 4. Smoke Test（E2E 驗證）
-
-Smoke test 作為端對端測試，呼叫真實的 Claude API 驗證主要流程可運作。放置於 `tests/manual/`，需要手動觸發。
-
-```bash
-export ANTHROPIC_API_KEY=your_api_key
-uv run pytest tests/manual --run-smoke -v
-```
-
-> **注意：** Smoke test 會產生 API 費用，執行前須設定 `ANTHROPIC_API_KEY` 並加上 `--run-smoke` 參數。
-
-## 程式碼品質與 CI/CD
-
-### 本地工具鏈
-
-| 工具 | 用途 | 指令 |
-|------|------|------|
-| **Ruff** | Linting + Formatting | `uv run ruff check .` / `uv run ruff format .` |
-| **Pyright** | 靜態型別檢查（strict 模式） | `uv run pyright` |
-| **pre-commit** | Git commit 前自動執行 Ruff + Pyright | `uv run pre-commit run --all-files` |
-
-### CI/CD Pipeline（GitHub Actions）
-
-| Workflow | 觸發條件 | 內容 |
-|----------|----------|------|
-| **Code Quality & Tests** | push / PR to `main` | Ruff lint + format check → Pyright → Pytest → Codecov 覆蓋率上傳 |
-| **SonarCloud** | push / PR to `main` | 執行測試產生覆蓋率報告 → SonarCloud 靜態分析（程式碼品質、安全性、技術債） |
-| **CodeQL** | push / PR to `main` + 每週排程 | GitHub CodeQL 安全性掃描 |
-
-## 技術架構
-
-| 層級 | 技術 |
+| 特點 | 說明 |
 |------|------|
-| Backend | Python 3.12+、FastAPI、Anthropic SDK |
-| Frontend | Vanilla JS、SSE、Marked、Highlight.js |
-| Session | Redis |
-| 套件管理 | uv |
-| AI Model | Claude Sonnet 4 |
-| 品質工具 | Ruff、Pyright、SonarCloud、CodeQL、Codecov |
-
-## 專案結構
-
-```
-agent-demo/
-├── src/agent_demo/
-│   ├── main.py              # FastAPI 應用程式與 API 路由
-│   ├── agent.py             # Agent 核心迴圈
-│   ├── session.py           # Redis Session 管理
-│   ├── usage_monitor.py     # Token 用量監控
-│   ├── types.py             # 型別定義
-│   └── tools/               # 工具實作
-│       ├── registry.py      # 工具註冊系統
-│       ├── bash.py          # Bash 指令執行
-│       ├── file_read.py     # 檔案讀取
-│       ├── file_edit.py     # 檔案編輯
-│       ├── file_list.py     # 目錄瀏覽
-│       └── grep_search.py   # 程式碼搜尋
-├── static/                  # 前端靜態檔案
-├── tests/                   # 測試
-├── docs/features/           # Gherkin 功能規格
-└── workspace/sandbox/       # Agent 沙箱工作目錄
-```
+| **API-first** | 直接呼叫 Anthropic API，不依賴 CLI 工具，無被封禁風險 |
+| **Pay-per-use** | 按量計費，輕度使用比月費訂閱更划算 |
+| **可組裝** | Tools、Skills、MCP 三種擴充機制，像樂高一樣自由拼裝 |
+| **可嵌入** | 作為 library 嵌入你的應用，不是獨立的 CLI 工具 |
 
 ## 快速開始
-
-### 前置需求
-
-- Python 3.12+
-- [uv](https://docs.astral.sh/uv/)
-- Redis
 
 ### 安裝
 
 ```bash
+# 前置需求：Python 3.12+、uv
 uv sync
 ```
 
-### 啟動
+### 設定 API Key
 
 ```bash
 export ANTHROPIC_API_KEY=your_api_key
-uv run uvicorn agent_demo.main:app --reload --port 8000
 ```
 
-開啟瀏覽器前往 `http://localhost:8000`。
+或在程式碼中明確指定：
+
+```python
+from agent_core import AgentCoreConfig, ProviderConfig
+
+config = AgentCoreConfig(
+    provider=ProviderConfig(api_key='sk-ant-...'),
+)
+```
+
+### 最小範例
+
+```python
+import asyncio
+from agent_core import Agent, AgentCoreConfig, AnthropicProvider
+
+async def main():
+    config = AgentCoreConfig()
+    provider = AnthropicProvider(config.provider)
+    agent = Agent(config=config, provider=provider)
+
+    async for chunk in agent.stream_message('什麼是 Python？'):
+        if isinstance(chunk, str):
+            print(chunk, end='', flush=True)
+
+asyncio.run(main())
+```
+
+## 使用手冊
+
+### 變更模型與參數
+
+```python
+from agent_core import AgentCoreConfig, ProviderConfig
+
+config = AgentCoreConfig(
+    provider=ProviderConfig(
+        model='claude-sonnet-4-20250514',   # 變更模型
+        max_tokens=4096,                     # 最大回應 token 數
+        timeout=60.0,                        # API 超時秒數
+        enable_prompt_caching=True,          # 啟用 prompt caching
+    ),
+    system_prompt='你是一位 Python 專家，請用繁體中文回答。',
+)
+```
+
+### 自訂工具（Tools）
+
+Tools 讓 Agent 能執行實際操作（讀檔、搜尋、API 呼叫等）。
+
+```python
+from agent_core import Agent, AgentCoreConfig, AnthropicProvider
+from agent_core.tools.registry import ToolRegistry
+
+# 定義自訂工具（支援同步與 async）
+def get_weather(city: str) -> str:
+    return f'{city} 目前 25°C，多雲'
+
+# 註冊工具
+registry = ToolRegistry()
+registry.register(
+    name='get_weather',
+    description='查詢指定城市的天氣資訊',
+    parameters={
+        'type': 'object',
+        'properties': {
+            'city': {'type': 'string', 'description': '城市名稱'},
+        },
+        'required': ['city'],
+    },
+    handler=get_weather,
+)
+
+# 建立 Agent 並注入工具
+config = AgentCoreConfig(
+    system_prompt='你是助手。需要查天氣時使用 get_weather 工具。',
+)
+provider = AnthropicProvider(config.provider)
+agent = Agent(config=config, provider=provider, tool_registry=registry)
+```
+
+**使用內建工具：**
+
+框架提供 5 個內建開發工具，可透過 `create_default_registry()` 一次註冊：
+
+```python
+from pathlib import Path
+from agent_core.tools.setup import create_default_registry
+
+registry = create_default_registry(Path('./workspace'))
+# 已註冊：read_file, edit_file, list_files, grep_search, bash
+```
+
+| 內建工具 | 說明 |
+|----------|------|
+| `read_file` | 讀取檔案內容，支援行數範圍與語言偵測 |
+| `edit_file` | 精確搜尋替換編輯，支援新建檔案與備份 |
+| `list_files` | 遞迴目錄列表，支援 pattern 過濾 |
+| `grep_search` | 正則搜尋程式碼，支援上下文行數 |
+| `bash` | 執行 Shell 指令（含安全限制） |
+
+**混合使用內建 + 自訂工具：**
+
+```python
+registry = create_default_registry(Path('./workspace'))
+
+# 追加自訂工具到同一個 registry
+registry.register(
+    name='calculator',
+    description='計算數學表達式',
+    parameters={
+        'type': 'object',
+        'properties': {
+            'expression': {'type': 'string'},
+        },
+        'required': ['expression'],
+    },
+    handler=lambda expression: str(eval(expression)),
+)
+```
+
+### 自訂技能（Skills）
+
+Skills 透過 system prompt 注入來改變 Agent 的行為模式，採用**兩階段載入**：
+
+- **Phase 1**：所有已註冊 Skill 的 `name` + `description` 注入 system prompt（讓 LLM 知道有哪些能力可用）
+- **Phase 2**：只有**啟用**的 Skill 才載入完整 `instructions`
+
+```python
+from agent_core import Skill, SkillRegistry
+
+skill_registry = SkillRegistry()
+
+# 註冊 Skill
+skill_registry.register(
+    Skill(
+        name='code_review',
+        description='程式碼審查模式',
+        instructions="""你現在是程式碼審查專家。審查時請注意：
+1. 命名是否清楚
+2. 是否有潛在 bug
+3. 效能問題
+4. 安全漏洞
+以 markdown 表格格式輸出審查結果。""",
+    )
+)
+
+# 啟用 Skill（觸發 Phase 2，完整 instructions 注入）
+skill_registry.activate('code_review')
+
+# 注入 Agent
+agent = Agent(
+    config=config,
+    provider=provider,
+    skill_registry=skill_registry,
+)
+```
+
+**Skill 的可見性控制：**
+
+```python
+# 只註冊不啟用 → Phase 1（描述出現在 system prompt，instructions 不載入）
+skill_registry.register(Skill(name='tdd', description='...', instructions='...'))
+
+# 啟用 → Phase 2（完整 instructions 注入 system prompt）
+skill_registry.activate('tdd')
+
+# 停用 → 回到 Phase 1
+skill_registry.deactivate('tdd')
+
+# 隱藏模式 → Phase 1 也不載入描述（完全隱形）
+Skill(name='hidden', description='...', instructions='...', disable_model_invocation=True)
+```
+
+### MCP 整合
+
+透過 MCP（Model Context Protocol）接入外部工具伺服器。框架定義了 `MCPClient` Protocol，只需實作此介面即可接入任何 MCP Server。
+
+```python
+from agent_core.mcp import MCPToolAdapter, MCPToolDefinition
+from agent_core.tools.registry import ToolRegistry
+
+# 實作 MCPClient Protocol（或使用 mcp SDK）
+class MyMCPClient:
+    server_name = 'weather'
+
+    async def list_tools(self) -> list[MCPToolDefinition]:
+        return [
+            MCPToolDefinition(
+                name='get_forecast',
+                description='取得天氣預報',
+                input_schema={
+                    'type': 'object',
+                    'properties': {
+                        'city': {'type': 'string'},
+                    },
+                    'required': ['city'],
+                },
+            ),
+        ]
+
+    async def call_tool(self, tool_name, arguments):
+        return {'forecast': 'sunny', 'temperature': 25}
+
+    async def close(self):
+        pass
+
+# 透過 Adapter 註冊到 ToolRegistry
+registry = ToolRegistry()
+adapter = MCPToolAdapter(MyMCPClient())
+await adapter.register_tools(registry)
+
+# 工具名稱自動加上 server 前綴
+print(registry.list_tools())  # ['weather__get_forecast']
+```
+
+**MCP + 內建工具混合使用：**
+
+```python
+# 先建立內建工具
+registry = create_default_registry(Path('./workspace'))
+
+# 再追加 MCP 工具
+adapter = MCPToolAdapter(my_mcp_client)
+await adapter.register_tools(registry)
+
+# Agent 同時擁有 read_file、edit_file... 和 MCP 工具
+agent = Agent(config=config, provider=provider, tool_registry=registry)
+```
+
+### 完整組合範例
+
+```python
+import asyncio
+from pathlib import Path
+from agent_core import (
+    Agent, AgentCoreConfig, AnthropicProvider,
+    ProviderConfig, Skill, SkillRegistry,
+)
+from agent_core.tools.setup import create_default_registry
+
+async def main():
+    # 1. 配置
+    config = AgentCoreConfig(
+        provider=ProviderConfig(model='claude-sonnet-4-20250514'),
+        system_prompt='你是專業的程式開發助手。',
+    )
+
+    # 2. 工具
+    registry = create_default_registry(Path('./workspace'))
+
+    # 3. 技能
+    skill_registry = SkillRegistry()
+    skill_registry.register(
+        Skill(
+            name='code_review',
+            description='程式碼審查',
+            instructions='審查程式碼並以表格輸出結果。',
+        )
+    )
+    skill_registry.activate('code_review')
+
+    # 4. 組裝 Agent
+    provider = AnthropicProvider(config.provider)
+    agent = Agent(
+        config=config,
+        provider=provider,
+        tool_registry=registry,
+        skill_registry=skill_registry,
+    )
+
+    # 5. 對話
+    async for chunk in agent.stream_message('請讀取 main.py 並審查程式碼'):
+        if isinstance(chunk, str):
+            print(chunk, end='', flush=True)
+    print()
+
+asyncio.run(main())
+```
+
+## 架構
+
+```
+agent_core/
+├── agent.py                 # Agent 核心（對話迴圈、工具調用）
+├── config.py                # 配置（ProviderConfig、AgentCoreConfig）
+├── main.py                  # FastAPI 應用（API 層，可選）
+├── providers/
+│   ├── base.py              # LLMProvider Protocol
+│   ├── anthropic_provider.py # Anthropic 實作
+│   └── exceptions.py        # Provider 錯誤型別
+├── tools/
+│   ├── registry.py          # ToolRegistry（工具管理與執行）
+│   ├── setup.py             # 內建工具工廠
+│   ├── file_read.py         # 檔案讀取
+│   ├── file_edit.py         # 檔案編輯
+│   ├── file_list.py         # 目錄瀏覽
+│   ├── grep_search.py       # 程式碼搜尋
+│   └── bash.py              # Bash 執行
+├── skills/
+│   ├── base.py              # Skill dataclass
+│   └── registry.py          # SkillRegistry（兩階段載入）
+├── mcp/
+│   ├── client.py            # MCPClient Protocol + MCPServerConfig
+│   └── adapter.py           # MCPToolAdapter（MCP → ToolRegistry 橋接）
+└── session/
+    ├── base.py              # SessionBackend Protocol
+    ├── memory_backend.py    # 記憶體 Session（預設）
+    └── redis_backend.py     # Redis Session
+```
+
+### 設計原則
+
+**Protocol-based 依賴注入**：所有外部依賴都透過 Protocol 定義介面，使用者可自行替換實作。
+
+| Protocol | 說明 | 內建實作 |
+|----------|------|----------|
+| `LLMProvider` | LLM API 介面 | `AnthropicProvider` |
+| `MCPClient` | MCP Server 通訊 | 使用者自行實作 |
+| `LockProvider` | 檔案操作鎖定 | 使用者自行實作 |
+| `SessionBackend` | 對話持久化 | `MemoryBackend`、`RedisBackend` |
 
 ## API 端點
 
+內建 FastAPI 應用提供 REST API，適合搭配前端使用：
+
+```bash
+uv run uvicorn agent_core.main:app --reload --port 8000
+```
+
 | 方法 | 路徑 | 說明 |
 |------|------|------|
-| POST | `/api/chat/stream` | 串流對話（SSE） |
+| POST | `/api/chat/stream` | SSE 串流對話 |
 | GET | `/api/chat/history` | 取得對話歷史 |
 | POST | `/api/chat/reset` | 清除對話 |
 | GET | `/api/chat/usage` | Token 使用量統計 |
 | POST | `/api/chat/usage/reset` | 重置使用量統計 |
+| GET | `/api/agent/status` | Agent 配置狀態（model、tools、skills） |
 | GET | `/api/files/tree` | 沙箱目錄樹 |
 | GET | `/api/files/content` | 取得檔案內容 |
 | GET | `/health` | 健康檢查 |
 
-## 內建工具
-
-| 工具 | 說明 | 安全限制 |
-|------|------|----------|
-| `read_file` | 讀取檔案內容，支援語言偵測與行數範圍 | 阻擋 `.env`、憑證檔；上限 1MB |
-| `edit_file` | 精確搜尋替換編輯，支援新建檔案 | 原子寫入、備份機制 |
-| `list_files` | 遞迴目錄列表，支援 pattern 過濾 | 排除 `node_modules`、`.git` |
-| `grep_search` | 正則搜尋程式碼，支援上下文行數 | 結果上限 100 筆 |
-| `bash` | 執行 Shell 指令 | 阻擋危險指令；逾時 120s；輸出遮蔽敏感資訊 |
-
 ## 開發
+
+本專案採用 **Gherkin 驅動的 TDD**：功能規格（`docs/features/*.feature`）→ 紅燈測試 → 綠燈實作 → 重構。
 
 ```bash
 # 測試
 uv run pytest
 
-# Lint
+# Lint + 格式化
 uv run ruff check .
-
-# 格式化
 uv run ruff format .
 
 # 型別檢查
 uv run pyright
 
-# Smoke test（需要 API Key）
+# Smoke test（需要 API Key，會產生費用）
 uv run pytest tests/manual --run-smoke -v
 ```
 
