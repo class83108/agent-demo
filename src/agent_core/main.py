@@ -25,6 +25,7 @@ from agent_core.config import AgentCoreConfig
 from agent_core.providers.anthropic_provider import AnthropicProvider
 from agent_core.session import SQLiteSessionBackend
 from agent_core.skills.registry import SkillRegistry
+from agent_core.token_counter import get_context_window
 from agent_core.tools.file_read import detect_language, read_file_handler
 from agent_core.tools.registry import ToolRegistry
 from agent_core.tools.setup import create_default_registry
@@ -352,14 +353,25 @@ async def chat_usage(
         )
 
     # 載入使用量統計並計算摘要
-    from agent_core.usage_monitor import UsageMonitor
+    from agent_core.token_counter import TokenCounter, get_context_window
+    from agent_core.usage_monitor import UsageMonitor, UsageRecord
 
+    config = AgentCoreConfig()
     usage_data = await session_manager.load_usage(session_id)
     monitor = UsageMonitor()
     if usage_data:
         monitor.load_from_dicts(usage_data)
 
     summary = monitor.get_summary()
+
+    # 從最後一筆使用記錄推算 context token 狀態
+    context_window = get_context_window(config.provider.model)
+    counter = TokenCounter(context_window=context_window)
+    if monitor.records:
+        last_record: UsageRecord = monitor.records[-1]
+        counter.set_last_tokens(last_record.total_input_tokens, last_record.output_tokens)
+
+    summary['context'] = counter.get_status()
     return JSONResponse(summary)
 
 
@@ -413,6 +425,7 @@ async def agent_status() -> JSONResponse:
         {
             'model': config.provider.model,
             'max_tokens': config.provider.max_tokens,
+            'context_window': get_context_window(config.provider.model),
             'tools': tools,
             'skills': skills,
         }

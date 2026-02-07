@@ -88,6 +88,15 @@ class MockProvider:
             get_final_result=_get_final,
         )
 
+    async def count_tokens(
+        self,
+        messages: list[dict[str, Any]],
+        system: str,
+        tools: list[dict[str, Any]] | None = None,
+        max_tokens: int = 8192,
+    ) -> int:
+        return 0
+
 
 class ErrorProvider:
     """在 stream 進入時拋出指定錯誤的 Provider。"""
@@ -663,3 +672,111 @@ class TestSkillRegistryIntegration:
         assert '基礎 prompt' in system
         assert '程式碼審查' in system
         assert '詳細審查指令' in system
+
+
+# =============================================================================
+# Rule: Agent 應在每次 API 回應後更新 TokenCounter
+# =============================================================================
+
+
+class TestTokenCounterIntegration:
+    """測試 Agent 與 TokenCounter 的整合。"""
+
+    async def test_token_counter_updated_after_response(self) -> None:
+        """API 回應後 token_counter 應被更新。"""
+        usage = UsageInfo(input_tokens=1000, output_tokens=500)
+        final_msg = FinalMessage(
+            content=[{'type': 'text', 'text': '回應'}],
+            stop_reason='end_turn',
+            usage=usage,
+        )
+        provider = MockProvider([(['回應'], final_msg)])
+        agent = _make_agent(provider)
+
+        await collect_stream(agent, '測試')
+
+        assert agent.token_counter is not None
+        assert agent.token_counter.current_context_tokens == 1500
+
+    async def test_token_counter_updated_with_cache_tokens(self) -> None:
+        """含快取 token 的回應也應正確更新 token_counter。"""
+        usage = UsageInfo(
+            input_tokens=500,
+            output_tokens=400,
+            cache_creation_input_tokens=300,
+            cache_read_input_tokens=200,
+        )
+        final_msg = FinalMessage(
+            content=[{'type': 'text', 'text': '回應'}],
+            stop_reason='end_turn',
+            usage=usage,
+        )
+        provider = MockProvider([(['回應'], final_msg)])
+        agent = _make_agent(provider)
+
+        await collect_stream(agent, '測試')
+
+        # input: 500 + 300 + 200 = 1000, output: 400
+        assert agent.token_counter is not None
+        assert agent.token_counter.current_context_tokens == 1400
+
+    async def test_token_counter_disabled(self) -> None:
+        """token_counter 為 None 時不應報錯。"""
+        provider = MockProvider([(['回應'], _make_final_message('回應'))])
+        config = AgentCoreConfig(
+            provider=ProviderConfig(api_key='sk-test'),
+        )
+        agent = Agent(
+            config=config,
+            provider=provider,
+            token_counter=None,
+        )
+
+        # 應正常執行，不拋出異常
+        await collect_stream(agent, '測試')
+
+    async def test_token_counter_reflects_latest_call_in_tool_loop(self) -> None:
+        """工具迴圈中 token_counter 應反映最後一次 API 呼叫的 token 數。"""
+        registry = ToolRegistry()
+        registry.register(
+            name='test_tool',
+            description='測試工具',
+            parameters={
+                'type': 'object',
+                'properties': {'input': {'type': 'string'}},
+                'required': ['input'],
+            },
+            handler=lambda input: 'result',  # type: ignore[reportUnknownLambdaType]
+        )
+
+        # 第一次呼叫：tool_use，input_tokens=1000
+        first_usage = UsageInfo(input_tokens=1000, output_tokens=100)
+        first_msg = FinalMessage(
+            content=[
+                {'type': 'tool_use', 'id': 'tool_1', 'name': 'test_tool', 'input': {'input': 'x'}},
+            ],
+            stop_reason='tool_use',
+            usage=first_usage,
+        )
+
+        # 第二次呼叫：end_turn，input_tokens=2000（含工具結果）
+        second_usage = UsageInfo(input_tokens=2000, output_tokens=500)
+        second_msg = FinalMessage(
+            content=[{'type': 'text', 'text': '完成'}],
+            stop_reason='end_turn',
+            usage=second_usage,
+        )
+
+        provider = MockProvider(
+            [
+                ([], first_msg),
+                (['完成'], second_msg),
+            ]
+        )
+        agent = _make_agent(provider, tool_registry=registry)
+
+        await collect_stream(agent, '測試')
+
+        # 應反映最後一次 API 呼叫的 token 數
+        assert agent.token_counter is not None
+        assert agent.token_counter.current_context_tokens == 2500

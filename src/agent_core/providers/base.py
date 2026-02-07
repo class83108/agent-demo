@@ -80,3 +80,23 @@ class LLMProvider(Protocol):
             AsyncContextManager[StreamResult]
         """
         ...
+
+    async def count_tokens(
+        self,
+        messages: list[dict[str, Any]],
+        system: str,
+        tools: list[dict[str, Any]] | None = None,
+        max_tokens: int = 8192,
+    ) -> int:
+        """計算給定訊息的 token 數量。
+
+        Args:
+            messages: 對話訊息列表
+            system: 系統提示詞
+            tools: 工具定義列表（可選）
+            max_tokens: 最大回應 token 數
+
+        Returns:
+            input token 數量
+        """
+        ...

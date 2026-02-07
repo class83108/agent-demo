@@ -581,6 +581,18 @@ class TestAgentStatus:
         assert isinstance(data['max_tokens'], int)
 
     @pytest.mark.asyncio
+    async def test_status_returns_context_window(self) -> None:
+        """應回傳 context_window 欄位。"""
+        async with AsyncClient(transport=ASGITransport(app=app), base_url='http://test') as client:
+            response = await client.get(STATUS_URL)
+
+        assert response.status_code == 200
+        data = response.json()
+        assert 'context_window' in data
+        assert isinstance(data['context_window'], int)
+        assert data['context_window'] > 0
+
+    @pytest.mark.asyncio
     async def test_status_returns_tools_list(self) -> None:
         """應回傳工具清單（含 source）。"""
         from agent_core.tools.registry import ToolRegistry
@@ -1057,3 +1069,65 @@ class TestFileEventStreaming:
         assert len(file_change_events) == 1
         assert file_change_events[0]['data']['path'] == 'main.py'
         assert file_change_events[0]['data']['diff'] == diff_text
+
+
+USAGE_URL = '/api/chat/usage'
+
+
+class TestChatUsageContext:
+    """測試 /api/chat/usage 端點的 context 區塊。"""
+
+    @pytest.mark.asyncio
+    async def test_usage_returns_context_block_with_records(self) -> None:
+        """有使用記錄時應回傳 context 區塊。"""
+        mock_session = _make_mock_session_manager()
+        # 模擬有一筆使用記錄
+        mock_session.load_usage = AsyncMock(
+            return_value=[
+                {
+                    'timestamp': '2025-01-01T00:00:00',
+                    'input_tokens': 5000,
+                    'output_tokens': 2000,
+                    'cache_creation_input_tokens': 0,
+                    'cache_read_input_tokens': 0,
+                },
+            ]
+        )
+
+        with patch('agent_core.main.session_manager', mock_session):
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url='http://test'
+            ) as client:
+                response = await client.get(
+                    USAGE_URL,
+                    cookies=SESSION_COOKIE,
+                )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert 'context' in data
+        ctx = data['context']
+        assert ctx['current_tokens'] == 7000
+        assert ctx['context_window'] > 0
+        assert ctx['usage_percent'] > 0
+
+    @pytest.mark.asyncio
+    async def test_usage_returns_context_block_empty(self) -> None:
+        """無使用記錄時 context 區塊的 current_tokens 應為 0。"""
+        mock_session = _make_mock_session_manager()
+        mock_session.load_usage = AsyncMock(return_value=[])
+
+        with patch('agent_core.main.session_manager', mock_session):
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url='http://test'
+            ) as client:
+                response = await client.get(
+                    USAGE_URL,
+                    cookies=SESSION_COOKIE,
+                )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert 'context' in data
+        assert data['context']['current_tokens'] == 0
+        assert data['context']['usage_percent'] == pytest.approx(0.0)  # type: ignore[reportUnknownMemberType]

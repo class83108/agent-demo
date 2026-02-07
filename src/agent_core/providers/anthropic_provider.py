@@ -232,3 +232,48 @@ class AnthropicProvider:
             APIStatusError,
         ) as e:
             raise self._convert_error(e) from e
+
+    async def count_tokens(
+        self,
+        messages: list[dict[str, Any]],
+        system: str,
+        tools: list[dict[str, Any]] | None = None,
+        max_tokens: int = 8192,
+    ) -> int:
+        """計算給定訊息的 token 數量。
+
+        使用 Anthropic token counting API 精確計算。
+
+        Args:
+            messages: 對話訊息列表
+            system: 系統提示詞
+            tools: 工具定義列表（可選）
+            max_tokens: 最大回應 token 數
+
+        Returns:
+            input token 數量
+
+        Raises:
+            ProviderAuthError: API 認證失敗
+            ProviderConnectionError: API 連線失敗
+            ProviderError: 其他 API 錯誤
+        """
+        kwargs: dict[str, Any] = {
+            'model': self._config.model,
+            'messages': messages,
+            'system': system,
+            'max_tokens': max_tokens,
+        }
+        if tools:
+            kwargs['tools'] = tools
+
+        try:
+            result = await self._client.messages.count_tokens(**kwargs)
+            return result.input_tokens
+        except (
+            AuthenticationError,
+            anthropic.APITimeoutError,
+            APIConnectionError,
+            APIStatusError,
+        ) as e:
+            raise self._convert_error(e) from e

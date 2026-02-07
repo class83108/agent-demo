@@ -20,6 +20,7 @@ from agent_core.providers.exceptions import (
     ProviderTimeoutError,
 )
 from agent_core.skills.registry import SkillRegistry
+from agent_core.token_counter import TokenCounter
 from agent_core.tools.registry import ToolRegistry
 from agent_core.usage_monitor import UsageMonitor
 
@@ -39,6 +40,7 @@ class Agent:
         conversation: 對話歷史紀錄
         tool_registry: 工具註冊表（可選）
         usage_monitor: 使用量監控器（可選）
+        token_counter: Token 計數器（可選）
     """
 
     config: AgentCoreConfig
@@ -47,6 +49,7 @@ class Agent:
     tool_registry: ToolRegistry | None = None
     skill_registry: SkillRegistry | None = None
     usage_monitor: UsageMonitor | None = field(default_factory=UsageMonitor)
+    token_counter: TokenCounter | None = field(default_factory=TokenCounter)
 
     def __post_init__(self) -> None:
         """初始化日誌。"""
@@ -128,9 +131,12 @@ class Agent:
         return tool_result, event
 
     def _record_usage(self, final_message: Any) -> None:
-        """記錄 API 使用量（若有監控器且回應含 usage 資訊）。"""
-        if self.usage_monitor and final_message.usage:
-            self.usage_monitor.record(final_message.usage)
+        """記錄 API 使用量並更新 token 計數。"""
+        if final_message.usage:
+            if self.usage_monitor:
+                self.usage_monitor.record(final_message.usage)
+            if self.token_counter:
+                self.token_counter.update_from_usage(final_message.usage)
 
     def _has_tool_calls(self, final_message: Any) -> bool:
         """判斷回應是否包含工具調用。"""
