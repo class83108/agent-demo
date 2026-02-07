@@ -659,6 +659,120 @@ class TestAgentStatus:
         assert data['skills'] == {'registered': [], 'active': []}
 
 
+class TestSkillManagement:
+    """測試 Skill 啟用/停用端點 — POST /api/skills/{name}/activate & deactivate"""
+
+    @pytest.mark.asyncio
+    async def test_activate_registered_skill(self) -> None:
+        """啟用已註冊的 Skill 應成功。"""
+        from agent_core.skills.base import Skill
+        from agent_core.skills.registry import SkillRegistry
+
+        mock_skills = SkillRegistry()
+        mock_skills.register(
+            Skill(name='code_review', description='程式碼審查', instructions='...')
+        )
+
+        with patch('agent_core.main.skill_registry', mock_skills):
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url='http://test'
+            ) as client:
+                response = await client.post('/api/skills/code_review/activate')
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data['status'] == 'ok'
+        assert 'code_review' in mock_skills.list_active_skills()
+
+    @pytest.mark.asyncio
+    async def test_activate_unknown_skill_returns_404(self) -> None:
+        """啟用不存在的 Skill 應回傳 404。"""
+        from agent_core.skills.registry import SkillRegistry
+
+        mock_skills = SkillRegistry()
+
+        with patch('agent_core.main.skill_registry', mock_skills):
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url='http://test'
+            ) as client:
+                response = await client.post('/api/skills/nonexistent/activate')
+
+        assert response.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_deactivate_active_skill(self) -> None:
+        """停用已啟用的 Skill 應成功。"""
+        from agent_core.skills.base import Skill
+        from agent_core.skills.registry import SkillRegistry
+
+        mock_skills = SkillRegistry()
+        mock_skills.register(
+            Skill(name='code_review', description='程式碼審查', instructions='...')
+        )
+        mock_skills.activate('code_review')
+
+        with patch('agent_core.main.skill_registry', mock_skills):
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url='http://test'
+            ) as client:
+                response = await client.post('/api/skills/code_review/deactivate')
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data['status'] == 'ok'
+        assert 'code_review' not in mock_skills.list_active_skills()
+
+    @pytest.mark.asyncio
+    async def test_deactivate_unknown_skill_returns_404(self) -> None:
+        """停用不存在的 Skill 應回傳 404。"""
+        from agent_core.skills.registry import SkillRegistry
+
+        mock_skills = SkillRegistry()
+
+        with patch('agent_core.main.skill_registry', mock_skills):
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url='http://test'
+            ) as client:
+                response = await client.post('/api/skills/nonexistent/deactivate')
+
+        assert response.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_activate_when_no_skill_registry(self) -> None:
+        """skill_registry 為 None 時應回傳 404。"""
+        with patch('agent_core.main.skill_registry', None):
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url='http://test'
+            ) as client:
+                response = await client.post('/api/skills/any/activate')
+
+        assert response.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_status_reflects_activation(self) -> None:
+        """啟用 Skill 後，/api/agent/status 應反映變更。"""
+        from agent_core.skills.base import Skill
+        from agent_core.skills.registry import SkillRegistry
+
+        mock_skills = SkillRegistry()
+        mock_skills.register(Skill(name='tdd', description='測試驅動開發', instructions='...'))
+
+        with patch('agent_core.main.skill_registry', mock_skills):
+            async with AsyncClient(
+                transport=ASGITransport(app=app), base_url='http://test'
+            ) as client:
+                # 啟用前
+                before = await client.get(STATUS_URL)
+                assert before.json()['skills']['active'] == []
+
+                # 啟用
+                await client.post('/api/skills/tdd/activate')
+
+                # 啟用後
+                after = await client.get(STATUS_URL)
+                assert 'tdd' in after.json()['skills']['active']
+
+
 class TestFileEventStreaming:
     """測試檔案事件 SSE 推送 — 對應 Rule: 工具執行時應推送 SSE 事件"""
 

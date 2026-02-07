@@ -444,6 +444,62 @@ async def agent_status() -> JSONResponse:
     )
 
 
+@app.post('/api/skills/{name}/activate')
+async def skill_activate(name: str) -> JSONResponse:
+    """啟用指定 Skill。
+
+    Args:
+        name: Skill 名稱
+
+    Returns:
+        啟用結果
+    """
+    if not skill_registry:
+        return JSONResponse(
+            {'error': 'Skill Registry 未初始化'},
+            status_code=404,
+        )
+
+    try:
+        skill_registry.activate(name)
+    except KeyError:
+        return JSONResponse(
+            {'error': f"Skill '{name}' 不存在"},
+            status_code=404,
+        )
+
+    logger.info('Skill 已透過 API 啟用', extra={'skill_name': name})
+    return JSONResponse({'status': 'ok', 'skill': name, 'active': True})
+
+
+@app.post('/api/skills/{name}/deactivate')
+async def skill_deactivate(name: str) -> JSONResponse:
+    """停用指定 Skill。
+
+    Args:
+        name: Skill 名稱
+
+    Returns:
+        停用結果
+    """
+    if not skill_registry:
+        return JSONResponse(
+            {'error': 'Skill Registry 未初始化'},
+            status_code=404,
+        )
+
+    # 檢查 Skill 是否存在
+    if skill_registry.get(name) is None:
+        return JSONResponse(
+            {'error': f"Skill '{name}' 不存在"},
+            status_code=404,
+        )
+
+    skill_registry.deactivate(name)
+    logger.info('Skill 已透過 API 停用', extra={'skill_name': name})
+    return JSONResponse({'status': 'ok', 'skill': name, 'active': False})
+
+
 @app.get('/health')
 async def health() -> JSONResponse:
     """健康檢查端點。"""

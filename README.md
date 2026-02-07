@@ -200,6 +200,26 @@ skill_registry.deactivate('tdd')
 Skill(name='hidden', description='...', instructions='...', disable_model_invocation=True)
 ```
 
+**透過 API 啟用/停用（給終端使用者）：**
+
+除了在程式碼中控制，也可以透過 REST API 讓使用者在對話過程中動態切換 Skill：
+
+```bash
+# 查看目前的 Skill 狀態
+curl http://localhost:8000/api/agent/status
+# → {"skills": {"registered": ["code_review", "tdd"], "active": []}}
+
+# 啟用 Skill
+curl -X POST http://localhost:8000/api/skills/code_review/activate
+# → {"status": "ok", "skill": "code_review", "active": true}
+
+# 停用 Skill
+curl -X POST http://localhost:8000/api/skills/code_review/deactivate
+# → {"status": "ok", "skill": "code_review", "active": false}
+```
+
+啟用後，下一次對話就會自動注入該 Skill 的 instructions 到 system prompt。
+
 ### MCP 整合
 
 透過 MCP（Model Context Protocol）接入外部工具伺服器。框架定義了 `MCPClient` Protocol，只需實作此介面即可接入任何 MCP Server。
@@ -364,6 +384,8 @@ uv run uvicorn agent_core.main:app --reload --port 8000
 | GET | `/api/chat/usage` | Token 使用量統計 |
 | POST | `/api/chat/usage/reset` | 重置使用量統計 |
 | GET | `/api/agent/status` | Agent 配置狀態（model、tools、skills） |
+| POST | `/api/skills/{name}/activate` | 啟用指定 Skill |
+| POST | `/api/skills/{name}/deactivate` | 停用指定 Skill |
 | GET | `/api/files/tree` | 沙箱目錄樹 |
 | GET | `/api/files/content` | 取得檔案內容 |
 | GET | `/health` | 健康檢查 |
