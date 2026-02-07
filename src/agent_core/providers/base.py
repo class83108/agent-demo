@@ -100,3 +100,21 @@ class LLMProvider(Protocol):
             input token 數量
         """
         ...
+
+    async def create(
+        self,
+        messages: list[dict[str, Any]],
+        system: str,
+        max_tokens: int = 8192,
+    ) -> FinalMessage:
+        """非串流呼叫，用於摘要等短回應場景。
+
+        Args:
+            messages: 對話訊息列表
+            system: 系統提示詞
+            max_tokens: 最大回應 token 數
+
+        Returns:
+            完整的回應訊息
+        """
+        ...

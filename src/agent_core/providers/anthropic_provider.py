@@ -277,3 +277,56 @@ class AnthropicProvider:
             APIStatusError,
         ) as e:
             raise self._convert_error(e) from e
+
+    async def create(
+        self,
+        messages: list[dict[str, Any]],
+        system: str,
+        max_tokens: int = 8192,
+    ) -> FinalMessage:
+        """非串流呼叫，用於摘要等短回應場景。
+
+        Args:
+            messages: 對話訊息列表
+            system: 系統提示詞
+            max_tokens: 最大回應 token 數
+
+        Returns:
+            完整的回應訊息
+
+        Raises:
+            ProviderAuthError: API 認證失敗
+            ProviderConnectionError: API 連線失敗
+            ProviderTimeoutError: API 請求超時
+            ProviderError: 其他 API 錯誤
+        """
+        try:
+            raw_msg = await self._client.messages.create(
+                model=self._config.model,
+                max_tokens=max_tokens,
+                messages=messages,  # type: ignore[arg-type]
+                system=system,
+                timeout=self._config.timeout,
+            )
+
+            content = [block.model_dump() for block in raw_msg.content]
+            usage = UsageInfo(
+                input_tokens=raw_msg.usage.input_tokens,
+                output_tokens=raw_msg.usage.output_tokens,
+                cache_creation_input_tokens=getattr(raw_msg.usage, 'cache_creation_input_tokens', 0)
+                or 0,
+                cache_read_input_tokens=getattr(raw_msg.usage, 'cache_read_input_tokens', 0) or 0,
+            )
+
+            return FinalMessage(
+                content=content,
+                stop_reason=raw_msg.stop_reason or 'end_turn',
+                usage=usage,
+            )
+        except (
+            AuthenticationError,
+            anthropic.APITimeoutError,
+            APIConnectionError,
+            APIStatusError,
+        ) as e:
+            raise self._convert_error(e) from e

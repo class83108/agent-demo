@@ -9,6 +9,7 @@ from __future__ import annotations
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from typing import Any
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -96,6 +97,18 @@ class MockProvider:
         max_tokens: int = 8192,
     ) -> int:
         return 0
+
+    async def create(
+        self,
+        messages: list[dict[str, Any]],
+        system: str,
+        max_tokens: int = 8192,
+    ) -> FinalMessage:
+        return FinalMessage(
+            content=[{'type': 'text', 'text': ''}],
+            stop_reason='end_turn',
+            usage=UsageInfo(),
+        )
 
 
 class ErrorProvider:
@@ -780,3 +793,124 @@ class TestTokenCounterIntegration:
         # 應反映最後一次 API 呼叫的 token 數
         assert agent.token_counter is not None
         assert agent.token_counter.current_context_tokens == 2500
+
+
+# =============================================================================
+# Rule: Agent 應在適當時機自動觸發 compact
+# =============================================================================
+
+
+class TestCompactIntegration:
+    """測試 Agent 與 Compact 的整合。"""
+
+    async def test_compact_triggered_when_threshold_exceeded(self) -> None:
+        """Scenario: 超過閾值時自動觸發 compact。"""
+        # 設定兩輪回應：第一輪正常，第二輪觸發 compact
+        first_msg = FinalMessage(
+            content=[{'type': 'text', 'text': '第一輪回應'}],
+            stop_reason='end_turn',
+            usage=UsageInfo(input_tokens=170_000, output_tokens=5000),
+        )
+        second_msg = FinalMessage(
+            content=[{'type': 'text', 'text': '第二輪回應'}],
+            stop_reason='end_turn',
+            usage=UsageInfo(input_tokens=50_000, output_tokens=2000),
+        )
+
+        provider = MockProvider(
+            [
+                (['第一輪回應'], first_msg),
+                (['第二輪回應'], second_msg),
+            ]
+        )
+        # 同時為 provider 加上 create 方法供 compact 摘要使用
+        provider.create = AsyncMock(  # type: ignore[attr-defined]
+            return_value=FinalMessage(
+                content=[{'type': 'text', 'text': '對話摘要'}],
+                stop_reason='end_turn',
+                usage=UsageInfo(input_tokens=100, output_tokens=50),
+            )
+        )
+
+        agent = _make_agent(provider)
+
+        # 第一輪：使用率 87.5% → 超過 80%
+        await collect_stream(agent, '第一則訊息')
+
+        # token_counter 應反映高使用率
+        assert agent.token_counter is not None
+        assert agent.token_counter.usage_percent > 80.0
+
+        # 第二輪：應觸發 compact
+        events: list[dict[str, Any]] = []
+        async for item in agent.stream_message('第二則訊息'):
+            if isinstance(item, dict):
+                events.append(item)
+
+        # 應有 compact 事件
+        compact_events = [e for e in events if e.get('type') == 'compact']
+        assert len(compact_events) > 0
+
+    async def test_compact_not_triggered_below_threshold(self) -> None:
+        """Scenario: 未超過閾值時不觸發 compact。"""
+        final_msg = FinalMessage(
+            content=[{'type': 'text', 'text': '回應'}],
+            stop_reason='end_turn',
+            usage=UsageInfo(input_tokens=10_000, output_tokens=1000),
+        )
+
+        provider = MockProvider([(['回應'], final_msg)])
+        agent = _make_agent(provider)
+
+        events: list[dict[str, Any]] = []
+        async for item in agent.stream_message('測試'):
+            if isinstance(item, dict):
+                events.append(item)
+
+        # 不應有 compact 事件
+        compact_events = [e for e in events if e.get('type') == 'compact']
+        assert len(compact_events) == 0
+
+    async def test_compact_yields_events(self) -> None:
+        """compact 時應 yield SSE 事件通知前端。"""
+        # 手動設定高 usage，讓下一輪觸發 compact
+        first_msg = FinalMessage(
+            content=[{'type': 'text', 'text': '回應'}],
+            stop_reason='end_turn',
+            usage=UsageInfo(input_tokens=170_000, output_tokens=5000),
+        )
+        second_msg = FinalMessage(
+            content=[{'type': 'text', 'text': '第二輪回應'}],
+            stop_reason='end_turn',
+            usage=UsageInfo(input_tokens=50_000, output_tokens=2000),
+        )
+
+        provider = MockProvider(
+            [
+                (['回應'], first_msg),
+                (['第二輪回應'], second_msg),
+            ]
+        )
+        provider.create = AsyncMock(  # type: ignore[attr-defined]
+            return_value=FinalMessage(
+                content=[{'type': 'text', 'text': '對話摘要'}],
+                stop_reason='end_turn',
+                usage=UsageInfo(input_tokens=100, output_tokens=50),
+            )
+        )
+
+        agent = _make_agent(provider)
+
+        # 第一輪建立高 usage
+        await collect_stream(agent, '第一則訊息')
+
+        # 第二輪應觸發 compact 並 yield 事件
+        events: list[dict[str, Any]] = []
+        async for item in agent.stream_message('第二則訊息'):
+            if isinstance(item, dict):
+                events.append(item)
+
+        compact_events = [e for e in events if e.get('type') == 'compact']
+        assert len(compact_events) >= 1
+        # compact 事件應包含壓縮結果資訊
+        assert 'data' in compact_events[0]

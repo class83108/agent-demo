@@ -36,19 +36,19 @@
 - [x] 提供 `read_more()` 方法，讓 Agent 可按需取得後續頁面
 - [x] 暫存區生命週期管理（in-memory，隨 ToolRegistry 生命週期；過期回傳提示重新取得）
 
-### 2-1. Token 計數
+### 2-1. Token 計數 ✅
 
-- [ ] 新增 `TokenCounter` 模組，計算 conversation 目前的 token 使用量
-- [ ] 支援 Anthropic token counting API（或本地估算）
-- [ ] 在每次 API 回應後更新累計 token 數（利用現有 `UsageInfo`）
-- [ ] 透過 `/api/agent/status` 回傳目前 token 使用量
+- [x] 新增 `TokenCounter` 模組，計算 conversation 目前的 token 使用量
+- [x] 支援 Anthropic token counting API（或本地估算）
+- [x] 在每次 API 回應後更新累計 token 數（利用現有 `UsageInfo`）
+- [x] 透過 `/api/agent/status` 回傳目前 token 使用量
 
-### 2-2. Compact（上下文壓縮）
+### 2-2. Compact（上下文壓縮）✅
 
-- [ ] 實作分層壓縮策略：先清除舊 tool_result 內容，再用 LLM 摘要早期對話
-- [ ] 定義 compact 觸發條件（例如：token 使用量超過 context window 的 80%）
-- [ ] Agent 在 `_stream_with_tool_loop()` 中自動檢查並觸發 compact
-- [ ] compact 過程對使用者透明（可選擇是否透過 SSE 通知前端）
+- [x] 實作分層壓縮策略：先清除舊 tool_result 內容，再用 LLM 摘要早期對話
+- [x] 定義 compact 觸發條件（例如：token 使用量超過 context window 的 80%）
+- [x] Agent 在 `_stream_with_tool_loop()` 中自動檢查並觸發 compact
+- [x] compact 過程對使用者透明（可選擇是否透過 SSE 通知前端）
 
 ---
 

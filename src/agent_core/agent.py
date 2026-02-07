@@ -12,6 +12,7 @@ from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any
 
+from agent_core.compact import COMPACT_THRESHOLD, compact_conversation
 from agent_core.config import AgentCoreConfig
 from agent_core.providers.base import LLMProvider
 from agent_core.providers.exceptions import (
@@ -130,6 +131,32 @@ class Agent:
             }
         return tool_result, event
 
+    async def _maybe_compact(self) -> dict[str, Any] | None:
+        """檢查並在需要時執行上下文壓縮。
+
+        Returns:
+            壓縮結果字典，若未觸發則回傳 None
+        """
+        if not self.token_counter:
+            return None
+
+        if self.token_counter.usage_percent < COMPACT_THRESHOLD:
+            return None
+
+        logger.info(
+            '偵測到 context window 使用率超過閾值，開始 compact',
+            extra={'usage_percent': round(self.token_counter.usage_percent, 2)},
+        )
+
+        result = await compact_conversation(
+            conversation=self.conversation,
+            provider=self.provider,
+            system_prompt=self._get_system_prompt(),
+            token_counter=self.token_counter,
+        )
+
+        return result
+
     def _record_usage(self, final_message: Any) -> None:
         """記錄 API 使用量並更新 token 計數。"""
         if final_message.usage:
@@ -154,6 +181,47 @@ class Agent:
         else:
             self.conversation.pop()
 
+    async def _execute_tool_calls(
+        self,
+        final_message: Any,
+    ) -> AsyncIterator[dict[str, Any]]:
+        """執行工具調用並 yield 事件通知。
+
+        Args:
+            final_message: 包含 tool_use block 的 API 回應
+
+        Yields:
+            工具調用事件通知（started / completed / failed）
+        """
+        tool_use_blocks = [b for b in final_message.content if b.get('type') == 'tool_use']
+
+        for block in tool_use_blocks:
+            logger.info(
+                '執行工具',
+                extra={'tool_name': block['name'], 'tool_id': block['id']},
+            )
+            yield {
+                'type': 'tool_call',
+                'data': {'name': block['name'], 'status': 'started'},
+            }
+
+        exec_results = await asyncio.gather(
+            *[self._execute_single_tool(b) for b in tool_use_blocks]
+        )
+
+        # 收集結果並通知前端完成狀態
+        tool_results: list[dict[str, Any]] = []
+        for block, (result_val, error) in zip(tool_use_blocks, exec_results):
+            tool_result, event = self._build_tool_result_entry(block, result_val, error)
+            tool_results.append(tool_result)
+            yield event
+
+        self.conversation.append({'role': 'user', 'content': tool_results})
+        logger.debug(
+            '工具結果已回傳，繼續對話',
+            extra={'tool_count': len(tool_results)},
+        )
+
     async def _stream_with_tool_loop(
         self,
     ) -> AsyncIterator[str | dict[str, Any]]:
@@ -172,6 +240,14 @@ class Agent:
 
         try:
             while True:
+                # 檢查是否需要 compact
+                compact_result = await self._maybe_compact()
+                if compact_result is not None:
+                    yield {
+                        'type': 'compact',
+                        'data': compact_result,
+                    }
+
                 system = self._get_system_prompt()
                 tools = self.tool_registry.get_tool_definitions() if self.tool_registry else None
 
@@ -201,35 +277,9 @@ class Agent:
                 if response_parts:
                     yield {'type': 'preamble_end', 'data': {}}
 
-                # 收集並執行所有工具調用
-                tool_use_blocks = [b for b in final_message.content if b.get('type') == 'tool_use']
-
-                for block in tool_use_blocks:
-                    logger.info(
-                        '執行工具',
-                        extra={'tool_name': block['name'], 'tool_id': block['id']},
-                    )
-                    yield {
-                        'type': 'tool_call',
-                        'data': {'name': block['name'], 'status': 'started'},
-                    }
-
-                exec_results = await asyncio.gather(
-                    *[self._execute_single_tool(b) for b in tool_use_blocks]
-                )
-
-                # 收集結果並通知前端完成狀態
-                tool_results: list[dict[str, Any]] = []
-                for block, (result_val, error) in zip(tool_use_blocks, exec_results):
-                    tool_result, event = self._build_tool_result_entry(block, result_val, error)
-                    tool_results.append(tool_result)
+                async for event in self._execute_tool_calls(final_message):
                     yield event
 
-                self.conversation.append({'role': 'user', 'content': tool_results})
-                logger.debug(
-                    '工具結果已回傳，繼續對話',
-                    extra={'tool_count': len(tool_results)},
-                )
                 response_parts = []
 
         except ProviderAuthError:
