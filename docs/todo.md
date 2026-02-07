@@ -2,14 +2,14 @@
 
 ## Priority 1: Conversation 持久化（必要）
 
-`SessionBackend` Protocol 已定義但無實作。Server 重啟對話全部消失。
+### 1-1. SQLite Backend（內建預設）✅
 
-### 1-1. SQLite Backend（內建預設）
-
-- [ ] 實作 `SQLiteSessionBackend`，符合現有 `SessionBackend` Protocol
-- [ ] 儲存：session ID、conversation messages、建立時間、更新時間
-- [ ] Server 重啟後自動恢復對話
-- [ ] 零依賴（Python 標準庫 `sqlite3`）
+- [x] 實作 `SQLiteSessionBackend`，符合現有 `SessionBackend` Protocol
+- [x] 儲存：session ID、conversation messages、建立時間、更新時間
+- [x] Server 重啟後自動恢復對話
+- [x] 零依賴（Python 標準庫 `sqlite3`）
+- [x] 使用量統計持久化（`load_usage` / `save_usage` / `reset_usage`）
+- [x] `main.py` 已切換為 SQLite 後端（移除 Redis 依賴）
 
 ### 1-2. Session 隔離
 

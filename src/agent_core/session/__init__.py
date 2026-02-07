@@ -1,10 +1,11 @@
 """Session 後端抽象層。
 
-提供可抽換的 Session 後端，支援記憶體與 Redis 兩種實作。
+提供可抽換的 Session 後端，支援記憶體、Redis 與 SQLite 三種實作。
 """
 
 from agent_core.session.base import SessionBackend
 from agent_core.session.memory_backend import MemorySessionBackend
 from agent_core.session.redis_backend import SessionManager
+from agent_core.session.sqlite_backend import SQLiteSessionBackend
 
-__all__ = ['MemorySessionBackend', 'SessionBackend', 'SessionManager']
+__all__ = ['MemorySessionBackend', 'SQLiteSessionBackend', 'SessionBackend', 'SessionManager']

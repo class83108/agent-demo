@@ -23,7 +23,7 @@ from pydantic import BaseModel
 from agent_core.agent import Agent
 from agent_core.config import AgentCoreConfig
 from agent_core.providers.anthropic_provider import AnthropicProvider
-from agent_core.session import SessionManager
+from agent_core.session import SQLiteSessionBackend
 from agent_core.skills.registry import SkillRegistry
 from agent_core.tools.file_read import detect_language, read_file_handler
 from agent_core.tools.registry import ToolRegistry
@@ -36,13 +36,13 @@ load_dotenv()
 logger = logging.getLogger(__name__)
 
 # --- 配置 ---
-REDIS_URL = 'redis://localhost:6381'
 STATIC_DIR = 'static'
 SANDBOX_DIR = 'workspace/sandbox'
+SESSION_DB_PATH = os.environ.get('SESSION_DB_PATH', 'sessions.db')
 IS_PRODUCTION = os.environ.get('ENV') == 'production'
 
 # --- 全局單例 ---
-session_manager = SessionManager(redis_url=REDIS_URL)
+session_manager = SQLiteSessionBackend(db_path=SESSION_DB_PATH)
 tool_registry: ToolRegistry | None = None
 skill_registry: SkillRegistry | None = None
 
@@ -226,7 +226,7 @@ async def _stream_chat(
     Yields:
         格式化的 SSE 事件字串
     """
-    # 從 Redis 讀取歷史和使用量統計
+    # 讀取歷史和使用量統計
     conversation = await session_manager.load(session_id)
     usage_data = await session_manager.load_usage(session_id)
 
@@ -303,7 +303,7 @@ async def chat_stream(
         httponly=True,
         samesite='lax',
         secure=IS_PRODUCTION,
-        max_age=86400,  # 24 小時，與 Redis SESSION_TTL 一致
+        max_age=86400,  # 24 小時
     )
 
     return response
@@ -371,7 +371,7 @@ async def chat_usage(
             status_code=400,
         )
 
-    # 從 Redis 載入使用量統計並計算摘要
+    # 載入使用量統計並計算摘要
     from agent_core.usage_monitor import UsageMonitor
 
     usage_data = await session_manager.load_usage(session_id)

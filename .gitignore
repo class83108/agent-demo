@@ -22,3 +22,6 @@ htmlcov/
 
 # Sandbox 工作目錄
 workspace/sandbox/
+
+# SQLite 資料庫
+*.db
