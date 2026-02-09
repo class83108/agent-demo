@@ -26,7 +26,7 @@ import shutil
 import struct
 import zlib
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 import allure
 import pytest
@@ -39,6 +39,7 @@ from agent_core.skills.base import Skill
 from agent_core.skills.registry import SkillRegistry
 from agent_core.token_counter import TokenCounter
 from agent_core.tools.setup import create_default_registry
+from agent_core.types import AgentEvent, MessageParam
 
 pytestmark = pytest.mark.smoke
 
@@ -61,10 +62,10 @@ async def _collect_response_with_events(
     agent: Agent,
     message: str,
     attachments: list[Attachment] | None = None,
-) -> tuple[str, list[dict[str, Any]]]:
+) -> tuple[str, list[AgentEvent]]:
     """收集串流回應的完整文字與事件。"""
     chunks: list[str] = []
-    events: list[dict[str, Any]] = []
+    events: list[AgentEvent] = []
     async for chunk in agent.stream_message(message, attachments=attachments):
         if isinstance(chunk, str):
             chunks.append(chunk)
@@ -86,16 +87,16 @@ def _make_agent(
     return Agent(**kwargs)
 
 
-def _find_pagination_marker(conversation: list[dict[str, Any]]) -> bool:
+def _find_pagination_marker(conversation: list[MessageParam]) -> bool:
     """檢查對話歷史中的 tool_result 是否包含分頁標記。"""
     for msg in conversation:
-        if msg.get('role') != 'user':
+        if msg['role'] != 'user':
             continue
-        content = msg.get('content')
+        content = msg['content']
         if not isinstance(content, list):
             continue
-        for block in cast(list[dict[str, Any]], content):
-            if block.get('type') != 'tool_result':
+        for block in content:
+            if block['type'] != 'tool_result':
                 continue
             result_text = str(block.get('content', ''))
             if '第 1 頁' in result_text and '共' in result_text:

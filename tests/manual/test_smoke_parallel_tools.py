@@ -9,7 +9,6 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any
 
 import allure
 import pytest
@@ -18,6 +17,7 @@ from agent_core.agent import Agent
 from agent_core.config import AgentCoreConfig
 from agent_core.providers.anthropic_provider import AnthropicProvider
 from agent_core.tools.setup import create_default_registry
+from agent_core.types import AgentEvent
 
 pytestmark = pytest.mark.smoke
 
@@ -59,7 +59,7 @@ class TestSmokeParallelTools:
         )
 
         chunks: list[str] = []
-        events: list[dict[str, Any]] = []
+        events: list[AgentEvent] = []
         async for item in agent.stream_message(
             '請同時讀取 hello.py 和 world.py 這兩個檔案的內容，並告訴我各自的回傳值'
         ):

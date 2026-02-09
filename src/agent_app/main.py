@@ -12,7 +12,7 @@ import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import Annotated, Any, cast
+from typing import Annotated, Any
 
 from dotenv import load_dotenv
 from fastapi import Cookie, FastAPI, Request
@@ -30,7 +30,7 @@ from agent_core.token_counter import get_context_window
 from agent_core.tools.file_read import detect_language, read_file_handler
 from agent_core.tools.registry import ToolRegistry
 from agent_core.tools.setup import create_default_registry
-from agent_core.types import ContentBlock
+from agent_core.types import ContentBlock, MessageParam
 
 # 在匯入 Anthropic client 之前加載 .env
 load_dotenv()
@@ -87,11 +87,11 @@ class ChatRequest(BaseModel):
 
 
 # --- 輔助函數 ---
-def _extract_text_from_content(content: Any) -> str | None:
+def _extract_text_from_content(content: str | list[ContentBlock]) -> str | None:
     """從 content 中提取文字內容。
 
     Args:
-        content: MessageParam 中的 content（可能是字串或 blocks 列表）
+        content: MessageParam 中的 content（字串或 blocks 列表）
 
     Returns:
         提取的文字內容，若無文字則返回 None
@@ -99,27 +99,18 @@ def _extract_text_from_content(content: Any) -> str | None:
     if isinstance(content, str):
         return content
 
-    if isinstance(content, list):
-        text_parts: list[str] = []
-        # 使用 cast 告訴型別檢查器這是 dict 列表
-        blocks = cast(list[dict[str, Any]], content)
-        for item in blocks:
-            # 檢查是否包含 type='text'
-            if item.get('type') != 'text':
-                continue
-            # 轉換為 ContentBlock 以獲得更精確的型別提示
-            block = cast(ContentBlock, item)
-            text = block.get('text', '')
-            if text:
-                text_parts.append(text)
-        if text_parts:
-            return ''.join(text_parts)
-
-    return None
+    text_parts: list[str] = []
+    for block in content:
+        if block.get('type') != 'text':
+            continue
+        text = block.get('text', '')
+        if text:
+            text_parts.append(str(text))
+    return ''.join(text_parts) if text_parts else None
 
 
 def _convert_to_frontend_messages(
-    conversation: list[Any],
+    conversation: list[MessageParam],
 ) -> list[dict[str, str]]:
     """將 MessageParam 格式轉換為前端友善的格式。
 
@@ -132,12 +123,9 @@ def _convert_to_frontend_messages(
     messages: list[dict[str, str]] = []
 
     for msg in conversation:
-        role = msg.get('role', '')
-        content = msg.get('content', '')
-
-        text_content = _extract_text_from_content(content)
+        text_content = _extract_text_from_content(msg['content'])
         if text_content is not None:
-            messages.append({'role': role, 'content': text_content})
+            messages.append({'role': msg['role'], 'content': text_content})
 
     return messages
 
@@ -175,39 +163,27 @@ def _sse_event(event: str, data: Any) -> str:
     return f'event: {event}\ndata: {encoded_data}\n\n'
 
 
-def _get_tool_result_blocks(msg: dict[str, Any]) -> list[dict[str, Any]]:
+def _get_tool_result_blocks(msg: MessageParam) -> list[ContentBlock]:
     """從 user 訊息中提取 tool_result 區塊。"""
-    if msg.get('role') != 'user':
+    if msg['role'] != 'user':
         return []
-    content = msg.get('content', [])
+    content = msg['content']
     if not isinstance(content, list):
         return []
-    blocks: list[dict[str, Any]] = []
-    for item in cast(list[Any], content):
-        if not isinstance(item, dict):
-            continue
-        block = cast(dict[str, Any], item)
-        if block.get('type') == 'tool_result':
-            blocks.append(block)
-    return blocks
+    return [block for block in content if block.get('type') == 'tool_result']
 
 
 def _extract_events_from_tool_content(tool_content: str) -> list[dict[str, Any]]:
     """從 tool_result 的 content 字串中解析 SSE 事件。"""
     try:
-        result_data = json.loads(tool_content)
-    except json.JSONDecodeError:
+        parsed: dict[str, Any] = json.loads(tool_content)
+    except (json.JSONDecodeError, TypeError):
         return []
-    if not isinstance(result_data, dict):
-        return []
-    result_dict = cast(dict[str, Any], result_data)
-    sse_events = result_dict.get('sse_events')
-    if not isinstance(sse_events, list):
-        return []
-    return cast(list[dict[str, Any]], sse_events)
+    sse_events: list[dict[str, Any]] = parsed.get('sse_events', [])
+    return sse_events
 
 
-def _extract_sse_events(conversation: list[Any]) -> list[dict[str, Any]]:
+def _extract_sse_events(conversation: list[MessageParam]) -> list[dict[str, Any]]:
     """從對話歷史中提取工具回傳的 SSE 事件。
 
     Args:

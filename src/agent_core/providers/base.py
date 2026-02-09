@@ -9,6 +9,8 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass
 from typing import Any, Protocol, runtime_checkable
 
+from agent_core.types import ContentBlock, MessageParam
+
 
 @dataclass
 class UsageInfo:
@@ -25,12 +27,12 @@ class FinalMessage:
     """Provider 回傳的最終訊息（provider-agnostic）。
 
     Attributes:
-        content: 內容區塊列表（dict 格式，非 SDK 特定型別）
+        content: 內容區塊列表（ContentBlock 型別）
         stop_reason: 停止原因（"end_turn" | "tool_use" 等）
         usage: API 使用量資訊
     """
 
-    content: list[dict[str, Any]]
+    content: list[ContentBlock]
     stop_reason: str
     usage: UsageInfo | None = None
 
@@ -63,7 +65,7 @@ class LLMProvider(Protocol):
 
     def stream(
         self,
-        messages: list[dict[str, Any]],
+        messages: list[MessageParam],
         system: str,
         tools: list[dict[str, Any]] | None = None,
         max_tokens: int = 8192,
@@ -83,7 +85,7 @@ class LLMProvider(Protocol):
 
     async def count_tokens(
         self,
-        messages: list[dict[str, Any]],
+        messages: list[MessageParam],
         system: str,
         tools: list[dict[str, Any]] | None = None,
         max_tokens: int = 8192,
@@ -103,7 +105,7 @@ class LLMProvider(Protocol):
 
     async def create(
         self,
-        messages: list[dict[str, Any]],
+        messages: list[MessageParam],
         system: str,
         max_tokens: int = 8192,
     ) -> FinalMessage:

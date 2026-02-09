@@ -11,7 +11,7 @@ import copy
 import logging
 from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
-from typing import Any
+from typing import Any, cast
 
 import anthropic
 from anthropic import APIConnectionError, APIStatusError, AuthenticationError
@@ -25,6 +25,7 @@ from agent_core.providers.exceptions import (
     ProviderRateLimitError,
     ProviderTimeoutError,
 )
+from agent_core.types import ContentBlock, MessageParam
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +56,7 @@ class AnthropicProvider:
 
     def _prepare_messages_with_cache(
         self,
-        messages: list[dict[str, Any]],
+        messages: list[MessageParam],
     ) -> list[dict[str, Any]]:
         """為訊息列表的最後一則添加 cache_control。
 
@@ -70,7 +71,8 @@ class AnthropicProvider:
         if not messages:
             return []
 
-        msgs = copy.deepcopy(messages)
+        # deepcopy 後轉為 dict 以便加入 cache_control 等額外欄位
+        msgs: list[dict[str, Any]] = copy.deepcopy(messages)  # type: ignore[arg-type]
         last_msg = msgs[-1]
         content = last_msg.get('content')
 
@@ -89,7 +91,7 @@ class AnthropicProvider:
 
     def build_stream_kwargs(
         self,
-        messages: list[dict[str, Any]],
+        messages: list[MessageParam],
         system: str,
         tools: list[dict[str, Any]] | None = None,
         max_tokens: int | None = None,
@@ -197,7 +199,8 @@ class AnthropicProvider:
         Returns:
             轉換後的 FinalMessage
         """
-        content = [block.model_dump() for block in raw_msg.content]
+        # model_dump() 回傳 dict[str, Any]，在 SDK 邊界 cast 為 ContentBlock
+        content = cast(list[ContentBlock], [block.model_dump() for block in raw_msg.content])
         usage = UsageInfo(
             input_tokens=raw_msg.usage.input_tokens,
             output_tokens=raw_msg.usage.output_tokens,
@@ -283,7 +286,7 @@ class AnthropicProvider:
     @asynccontextmanager
     async def stream(
         self,
-        messages: list[dict[str, Any]],
+        messages: list[MessageParam],
         system: str,
         tools: list[dict[str, Any]] | None = None,
         max_tokens: int = 8192,
@@ -341,7 +344,7 @@ class AnthropicProvider:
 
     async def count_tokens(
         self,
-        messages: list[dict[str, Any]],
+        messages: list[MessageParam],
         system: str,
         tools: list[dict[str, Any]] | None = None,
         max_tokens: int = 8192,
@@ -381,7 +384,7 @@ class AnthropicProvider:
 
     async def create(
         self,
-        messages: list[dict[str, Any]],
+        messages: list[MessageParam],
         system: str,
         max_tokens: int = 8192,
     ) -> FinalMessage:

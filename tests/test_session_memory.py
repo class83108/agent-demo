@@ -7,11 +7,10 @@
 
 from __future__ import annotations
 
-from typing import Any
-
 import allure
 
 from agent_core.session.memory_backend import MemorySessionBackend
+from agent_core.types import MessageParam
 
 # =============================================================================
 # Rule: 記憶體後端應支援基本操作
@@ -27,7 +26,7 @@ class TestMemorySessionBackend:
     async def test_save_and_load(self) -> None:
         """Scenario: 儲存並讀取對話歷史。"""
         backend = MemorySessionBackend()
-        conversation: list[dict[str, Any]] = [
+        conversation: list[MessageParam] = [
             {'role': 'user', 'content': 'Hello'},
             {'role': 'assistant', 'content': 'Hi there'},
         ]
@@ -61,7 +60,7 @@ class TestMemorySessionBackend:
     async def test_save_does_not_share_reference(self) -> None:
         """儲存後修改原始列表不應影響已儲存的資料。"""
         backend = MemorySessionBackend()
-        conversation: list[dict[str, Any]] = [
+        conversation: list[MessageParam] = [
             {'role': 'user', 'content': 'Hello'},
         ]
 

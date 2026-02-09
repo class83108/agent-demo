@@ -15,6 +15,8 @@ from unittest.mock import AsyncMock, MagicMock
 import allure
 import pytest
 
+from agent_core.types import MessageParam
+
 # --- 輔助工具 ---
 
 
@@ -105,7 +107,7 @@ class TestAnthropicProviderStream:
         config = ProviderConfig(api_key='sk-test')
         provider = AnthropicProvider(config, client=mock_client)
 
-        messages = [{'role': 'user', 'content': 'Hi'}]
+        messages: list[MessageParam] = [{'role': 'user', 'content': 'Hi'}]
         text_parts: list[str] = []
 
         async with provider.stream(messages=messages, system='test') as result:
@@ -142,7 +144,7 @@ class TestAnthropicProviderStream:
         config = ProviderConfig(api_key='sk-test')
         provider = AnthropicProvider(config, client=mock_client)
 
-        messages = [{'role': 'user', 'content': '讀取 test.py'}]
+        messages: list[MessageParam] = [{'role': 'user', 'content': '讀取 test.py'}]
 
         async with provider.stream(messages=messages, system='test') as result:
             async for _ in result.text_stream:

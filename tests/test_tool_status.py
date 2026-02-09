@@ -19,6 +19,7 @@ from agent_core.agent import Agent
 from agent_core.config import AgentCoreConfig, ProviderConfig
 from agent_core.providers.base import FinalMessage, StreamResult, UsageInfo
 from agent_core.tools.registry import ToolRegistry
+from agent_core.types import AgentEvent, ContentBlock, MessageParam
 
 # =============================================================================
 # Mock Helpers
@@ -28,7 +29,7 @@ from agent_core.tools.registry import ToolRegistry
 def _make_final_message(
     text: str = '',
     stop_reason: str = 'end_turn',
-    content: list[dict[str, Any]] | None = None,
+    content: list[ContentBlock] | None = None,
 ) -> FinalMessage:
     """建立 FinalMessage。"""
     if content is None:
@@ -50,7 +51,7 @@ class MockProvider:
     @asynccontextmanager
     async def stream(
         self,
-        messages: list[dict[str, Any]],
+        messages: list[MessageParam],
         system: str,
         tools: list[dict[str, Any]] | None = None,
         max_tokens: int = 8192,
@@ -84,12 +85,10 @@ def _make_agent(
     )
 
 
-async def collect_stream_with_events(
-    agent: Agent, message: str
-) -> tuple[str, list[dict[str, Any]]]:
+async def collect_stream_with_events(agent: Agent, message: str) -> tuple[str, list[AgentEvent]]:
     """收集串流回應，分離文字 token 與事件。"""
     text_parts: list[str] = []
-    events: list[dict[str, Any]] = []
+    events: list[AgentEvent] = []
 
     async for item in agent.stream_message(message):
         if isinstance(item, str):
@@ -193,7 +192,7 @@ class TestToolCallEvents:
             handler=lambda path: {'content': 'file content', 'path': path},  # type: ignore[reportUnknownLambdaType]
         )
 
-        tool_content = [
+        tool_content: list[ContentBlock] = [
             {
                 'type': 'tool_use',
                 'id': 't1',
@@ -246,7 +245,7 @@ class TestToolCallEvents:
             handler=failing_handler,
         )
 
-        tool_content = [
+        tool_content: list[ContentBlock] = [
             {
                 'type': 'tool_use',
                 'id': 't1',
@@ -303,7 +302,7 @@ class TestPreambleEvents:
             handler=lambda path: {'content': 'ok', 'path': path},  # type: ignore[reportUnknownLambdaType]
         )
 
-        first_content = [
+        first_content: list[ContentBlock] = [
             {'type': 'text', 'text': '讓我查看程式碼...'},
             {
                 'type': 'tool_use',
@@ -348,7 +347,7 @@ class TestPreambleEvents:
             handler=lambda path: {'content': 'ok', 'path': path},  # type: ignore[reportUnknownLambdaType]
         )
 
-        tool_content = [
+        tool_content: list[ContentBlock] = [
             {
                 'type': 'tool_use',
                 'id': 't1',
@@ -387,7 +386,7 @@ class TestPreambleEvents:
             handler=lambda path: {'content': 'ok', 'path': path},  # type: ignore[reportUnknownLambdaType]
         )
 
-        first_content = [
+        first_content: list[ContentBlock] = [
             {'type': 'text', 'text': '先讀取第一個檔案...'},
             {
                 'type': 'tool_use',
@@ -398,7 +397,7 @@ class TestPreambleEvents:
         ]
         first_msg = _make_final_message(content=first_content, stop_reason='tool_use')
 
-        second_content = [
+        second_content: list[ContentBlock] = [
             {'type': 'text', 'text': '接下來讀取第二個...'},
             {
                 'type': 'tool_use',

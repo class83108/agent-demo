@@ -25,6 +25,7 @@ from agent_core.providers.exceptions import (
 from agent_core.skills.base import Skill
 from agent_core.skills.registry import SkillRegistry
 from agent_core.tools.registry import ToolRegistry
+from agent_core.types import AgentEvent, ContentBlock, MessageParam
 
 # =============================================================================
 # Mock Helpers
@@ -34,7 +35,7 @@ from agent_core.tools.registry import ToolRegistry
 def _make_final_message(
     text: str = '回應內容',
     stop_reason: str = 'end_turn',
-    content: list[dict[str, Any]] | None = None,
+    content: list[ContentBlock] | None = None,
 ) -> FinalMessage:
     """建立 FinalMessage。"""
     if content is None:
@@ -60,7 +61,7 @@ class MockProvider:
     @asynccontextmanager
     async def stream(
         self,
-        messages: list[dict[str, Any]],
+        messages: list[MessageParam],
         system: str,
         tools: list[dict[str, Any]] | None = None,
         max_tokens: int = 8192,
@@ -92,7 +93,7 @@ class MockProvider:
 
     async def count_tokens(
         self,
-        messages: list[dict[str, Any]],
+        messages: list[MessageParam],
         system: str,
         tools: list[dict[str, Any]] | None = None,
         max_tokens: int = 8192,
@@ -101,7 +102,7 @@ class MockProvider:
 
     async def create(
         self,
-        messages: list[dict[str, Any]],
+        messages: list[MessageParam],
         system: str,
         max_tokens: int = 8192,
     ) -> FinalMessage:
@@ -121,7 +122,7 @@ class ErrorProvider:
     @asynccontextmanager
     async def stream(
         self,
-        messages: list[dict[str, Any]],
+        messages: list[MessageParam],
         system: str,
         tools: list[dict[str, Any]] | None = None,
         max_tokens: int = 8192,
@@ -144,7 +145,7 @@ class PartialStreamProvider:
     @asynccontextmanager
     async def stream(
         self,
-        messages: list[dict[str, Any]],
+        messages: list[MessageParam],
         system: str,
         tools: list[dict[str, Any]] | None = None,
         max_tokens: int = 8192,
@@ -194,15 +195,14 @@ async def collect_stream(agent: Agent, message: str) -> str:
     return ''.join(chunks)
 
 
-def _get_assistant_text(conversation_entry: dict[str, Any]) -> str:
+def _get_assistant_text(conversation_entry: MessageParam) -> str:
     """從對話歷史中的 assistant 條目取得文字內容。"""
-    content: Any = conversation_entry['content']
+    content = conversation_entry['content']
     if isinstance(content, str):
         return content
     texts: list[str] = []
-    content_list: list[dict[str, Any]] = content
-    for block in content_list:
-        if block.get('type') == 'text':
+    for block in content:
+        if block['type'] == 'text':
             texts.append(block['text'])
     return ''.join(texts)
 
@@ -432,7 +432,7 @@ class TestToolUseLoop:
         )
 
         # 第一次：tool_use
-        tool_content = [
+        tool_content: list[ContentBlock] = [
             {
                 'type': 'tool_use',
                 'id': 'tool_1',
@@ -484,7 +484,7 @@ class TestToolUseLoop:
         )
 
         # 第一次：兩個 tool_use
-        first_content = [
+        first_content: list[ContentBlock] = [
             {'type': 'text', 'text': '讓我讀取這兩個檔案'},
             {'type': 'tool_use', 'id': 'tool_a', 'name': 'read_file', 'input': {'path': 'a.py'}},
             {'type': 'tool_use', 'id': 'tool_b', 'name': 'read_file', 'input': {'path': 'b.py'}},
@@ -503,7 +503,7 @@ class TestToolUseLoop:
         agent = _make_agent(provider, tool_registry=registry)
 
         chunks: list[str] = []
-        events: list[dict[str, Any]] = []
+        events: list[AgentEvent] = []
         async for item in agent.stream_message('請讀取 a.py 和 b.py'):
             if isinstance(item, str):
                 chunks.append(item)
@@ -550,7 +550,7 @@ class TestToolUseLoop:
             handler=failing_handler,
         )
 
-        tool_content = [
+        tool_content: list[ContentBlock] = [
             {
                 'type': 'tool_use',
                 'id': 'tool_err',
@@ -886,7 +886,7 @@ class TestCompactIntegration:
         assert agent.token_counter.usage_percent > 80.0
 
         # 第二輪：應觸發 compact
-        events: list[dict[str, Any]] = []
+        events: list[AgentEvent] = []
         async for item in agent.stream_message('第二則訊息'):
             if isinstance(item, dict):
                 events.append(item)
@@ -907,7 +907,7 @@ class TestCompactIntegration:
         provider = MockProvider([(['回應'], final_msg)])
         agent = _make_agent(provider)
 
-        events: list[dict[str, Any]] = []
+        events: list[AgentEvent] = []
         async for item in agent.stream_message('測試'):
             if isinstance(item, dict):
                 events.append(item)
@@ -951,7 +951,7 @@ class TestCompactIntegration:
         await collect_stream(agent, '第一則訊息')
 
         # 第二輪應觸發 compact 並 yield 事件
-        events: list[dict[str, Any]] = []
+        events: list[AgentEvent] = []
         async for item in agent.stream_message('第二則訊息'):
             if isinstance(item, dict):
                 events.append(item)

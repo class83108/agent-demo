@@ -9,8 +9,9 @@ from __future__ import annotations
 import json
 import logging
 import sqlite3
-from typing import Any
+from typing import Any, cast
 
+from agent_core.types import MessageParam
 from agent_core.usage_monitor import UsageRecord
 
 logger = logging.getLogger(__name__)
@@ -59,7 +60,7 @@ class SQLiteSessionBackend:
         )
         self._conn.commit()
 
-    async def load(self, session_id: str) -> list[dict[str, Any]]:
+    async def load(self, session_id: str) -> list[MessageParam]:
         """讀取對話歷史。
 
         Args:
@@ -76,14 +77,15 @@ class SQLiteSessionBackend:
         if row is None:
             return []
 
-        data: list[dict[str, Any]] = json.loads(row[0])
+        # json.loads 回傳 Any，在反序列化邊界使用 cast
+        data = cast(list[MessageParam], json.loads(row[0]))
         logger.debug(
             '讀取會話歷史（SQLite）',
             extra={'session_id': session_id, 'messages': len(data)},
         )
         return data
 
-    async def save(self, session_id: str, conversation: list[dict[str, Any]]) -> None:
+    async def save(self, session_id: str, conversation: list[MessageParam]) -> None:
         """儲存對話歷史。
 
         使用 UPSERT 語法：存在則更新，不存在則新增。

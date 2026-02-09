@@ -15,7 +15,7 @@ from typing import Any
 from agent_core.compact import COMPACT_THRESHOLD, compact_conversation
 from agent_core.config import AgentCoreConfig
 from agent_core.multimodal import Attachment, build_content_blocks
-from agent_core.providers.base import LLMProvider
+from agent_core.providers.base import FinalMessage, LLMProvider
 from agent_core.providers.exceptions import (
     ProviderAuthError,
     ProviderConnectionError,
@@ -24,6 +24,14 @@ from agent_core.providers.exceptions import (
 from agent_core.skills.registry import SkillRegistry
 from agent_core.token_counter import TokenCounter
 from agent_core.tools.registry import ToolRegistry
+from agent_core.types import (
+    AgentEvent,
+    CompactResult,
+    ContentBlock,
+    MessageParam,
+    ToolResultBlock,
+    ToolUseBlock,
+)
 from agent_core.usage_monitor import UsageMonitor
 
 logger = logging.getLogger(__name__)
@@ -47,7 +55,7 @@ class Agent:
 
     config: AgentCoreConfig
     provider: LLMProvider
-    conversation: list[dict[str, Any]] = field(default_factory=lambda: [])
+    conversation: list[MessageParam] = field(default_factory=lambda: [])
     tool_registry: ToolRegistry | None = None
     skill_registry: SkillRegistry | None = None
     usage_monitor: UsageMonitor | None = field(default_factory=UsageMonitor)
@@ -73,11 +81,12 @@ class Agent:
 
     async def _execute_single_tool(
         self,
-        tool_block: dict[str, Any],
+        tool_block: ToolUseBlock,
     ) -> tuple[Any, Exception | None]:
         """執行單一工具，回傳 (結果, 錯誤)。"""
+        assert self.tool_registry is not None
         try:
-            res = await self.tool_registry.execute(  # type: ignore[union-attr]
+            res = await self.tool_registry.execute(
                 tool_block['name'],
                 tool_block['input'],
             )
@@ -87,10 +96,10 @@ class Agent:
 
     def _build_tool_result_entry(
         self,
-        block: dict[str, Any],
+        block: ToolUseBlock,
         result_val: Any,
         error: Exception | None,
-    ) -> tuple[dict[str, Any], dict[str, Any]]:
+    ) -> tuple[ToolResultBlock, AgentEvent]:
         """建立單一工具的結果與事件通知。
 
         Returns:
@@ -102,41 +111,41 @@ class Agent:
                 if isinstance(result_val, dict)
                 else str(result_val)
             )
-            tool_result = {
-                'type': 'tool_result',
-                'tool_use_id': block['id'],
-                'content': result_content,
-            }
-            event = {
-                'type': 'tool_call',
-                'data': {'name': block['name'], 'status': 'completed'},
-            }
+            tool_result = ToolResultBlock(
+                type='tool_result',
+                tool_use_id=block['id'],
+                content=result_content,
+            )
+            event = AgentEvent(
+                type='tool_call',
+                data={'name': block['name'], 'status': 'completed'},
+            )
         else:
             logger.warning(
                 '工具執行失敗',
                 extra={'tool_name': block['name'], 'error': str(error)},
             )
-            tool_result = {
-                'type': 'tool_result',
-                'tool_use_id': block['id'],
-                'content': str(error),
-                'is_error': True,
-            }
-            event = {
-                'type': 'tool_call',
-                'data': {
+            tool_result = ToolResultBlock(
+                type='tool_result',
+                tool_use_id=block['id'],
+                content=str(error),
+                is_error=True,
+            )
+            event = AgentEvent(
+                type='tool_call',
+                data={
                     'name': block['name'],
                     'status': 'failed',
                     'error': str(error),
                 },
-            }
+            )
         return tool_result, event
 
-    async def _maybe_compact(self) -> dict[str, Any] | None:
+    async def _maybe_compact(self) -> CompactResult | None:
         """檢查並在需要時執行上下文壓縮。
 
         Returns:
-            壓縮結果字典，若未觸發則回傳 None
+            壓縮結果，若未觸發則回傳 None
         """
         if not self.token_counter:
             return None
@@ -158,7 +167,7 @@ class Agent:
 
         return result
 
-    def _record_usage(self, final_message: Any) -> None:
+    def _record_usage(self, final_message: FinalMessage) -> None:
         """記錄 API 使用量並更新 token 計數。"""
         if final_message.usage:
             if self.usage_monitor:
@@ -166,7 +175,7 @@ class Agent:
             if self.token_counter:
                 self.token_counter.update_from_usage(final_message.usage)
 
-    def _has_tool_calls(self, final_message: Any) -> bool:
+    def _has_tool_calls(self, final_message: FinalMessage) -> bool:
         """判斷回應是否包含工具調用。"""
         return final_message.stop_reason == 'tool_use' and self.tool_registry is not None
 
@@ -184,8 +193,8 @@ class Agent:
 
     async def _execute_tool_calls(
         self,
-        final_message: Any,
-    ) -> AsyncIterator[dict[str, Any]]:
+        final_message: FinalMessage,
+    ) -> AsyncIterator[AgentEvent]:
         """執行工具調用並 yield 事件通知。
 
         Args:
@@ -194,30 +203,34 @@ class Agent:
         Yields:
             工具調用事件通知（started / completed / failed）
         """
-        tool_use_blocks = [b for b in final_message.content if b.get('type') == 'tool_use']
+        tool_use_blocks: list[ToolUseBlock] = []
+        for b in final_message.content:
+            if b['type'] == 'tool_use':
+                tool_use_blocks.append(b)
 
         for block in tool_use_blocks:
             logger.info(
                 '執行工具',
                 extra={'tool_name': block['name'], 'tool_id': block['id']},
             )
-            yield {
-                'type': 'tool_call',
-                'data': {'name': block['name'], 'status': 'started'},
-            }
+            yield AgentEvent(
+                type='tool_call',
+                data={'name': block['name'], 'status': 'started'},
+            )
 
         exec_results = await asyncio.gather(
             *[self._execute_single_tool(b) for b in tool_use_blocks]
         )
 
         # 收集結果並通知前端完成狀態
-        tool_results: list[dict[str, Any]] = []
+        tool_results: list[ToolResultBlock] = []
         for block, (result_val, error) in zip(tool_use_blocks, exec_results):
             tool_result, event = self._build_tool_result_entry(block, result_val, error)
             tool_results.append(tool_result)
             yield event
 
-        self.conversation.append({'role': 'user', 'content': tool_results})
+        tool_content: list[ContentBlock] = list(tool_results)
+        self.conversation.append({'role': 'user', 'content': tool_content})
         logger.debug(
             '工具結果已回傳，繼續對話',
             extra={'tool_count': len(tool_results)},
@@ -225,12 +238,12 @@ class Agent:
 
     async def _stream_with_tool_loop(
         self,
-    ) -> AsyncIterator[str | dict[str, Any]]:
+    ) -> AsyncIterator[str | AgentEvent]:
         """執行串流迴圈，支援工具調用。
 
         Yields:
             str: 回應的每個 token
-            dict: 事件通知（tool_call、preamble_end）
+            AgentEvent: 事件通知（tool_call、preamble_end、compact）
 
         Raises:
             ProviderAuthError: Provider 認證失敗
@@ -244,10 +257,7 @@ class Agent:
                 # 檢查是否需要 compact
                 compact_result = await self._maybe_compact()
                 if compact_result is not None:
-                    yield {
-                        'type': 'compact',
-                        'data': compact_result,
-                    }
+                    yield AgentEvent(type='compact', data=dict(compact_result))
 
                 system = self._get_system_prompt()
                 tools = self.tool_registry.get_tool_definitions() if self.tool_registry else None
@@ -265,7 +275,8 @@ class Agent:
                     final_message = await result.get_final_result()
 
                 self._record_usage(final_message)
-                self.conversation.append({'role': 'assistant', 'content': final_message.content})
+                content: list[ContentBlock] = list(final_message.content)
+                self.conversation.append({'role': 'assistant', 'content': content})
 
                 # 若無工具調用，結束迴圈
                 if not self._has_tool_calls(final_message):
@@ -276,7 +287,7 @@ class Agent:
                     break
 
                 if response_parts:
-                    yield {'type': 'preamble_end', 'data': {}}
+                    yield AgentEvent(type='preamble_end', data={})
 
                 async for event in self._execute_tool_calls(final_message):
                     yield event
@@ -294,7 +305,7 @@ class Agent:
         self,
         content: str,
         attachments: list[Attachment] | None = None,
-    ) -> AsyncIterator[str | dict[str, Any]]:
+    ) -> AsyncIterator[str | AgentEvent]:
         """以串流方式發送訊息並逐步取得回應。
 
         支援工具調用迴圈：當 LLM 回傳 tool_use 時，
@@ -307,7 +318,7 @@ class Agent:
 
         Yields:
             str: 回應的每個 token
-            dict: 事件通知（tool_call、preamble_end）
+            AgentEvent: 事件通知（tool_call、preamble_end）
 
         Raises:
             ValueError: 訊息為空白、附件格式不支援或過大

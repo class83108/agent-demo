@@ -16,7 +16,6 @@
 from __future__ import annotations
 
 import time
-from typing import Any
 
 import allure
 import pytest
@@ -24,6 +23,7 @@ import pytest
 from agent_core.agent import Agent
 from agent_core.config import AgentCoreConfig
 from agent_core.providers.anthropic_provider import AnthropicProvider
+from agent_core.types import AgentEvent
 
 pytestmark = pytest.mark.smoke
 
@@ -81,7 +81,7 @@ class TestPromptCachingSmoke:
         )  # 重複多次以達到 >= 1024 tokens
 
         # 第一次請求 - 創建緩存
-        first_chunks: list[str | dict[str, Any]] = []
+        first_chunks: list[str | AgentEvent] = []
         async for chunk in agent.stream_message(f'{long_context}\n\n請回答 "OK"'):
             first_chunks.append(chunk)
 
@@ -95,7 +95,7 @@ class TestPromptCachingSmoke:
         assert first_usage['tokens']['cache_read'] == 0
 
         # 第二次請求 - 應該命中緩存
-        second_chunks: list[str | dict[str, Any]] = []
+        second_chunks: list[str | AgentEvent] = []
         async for chunk in agent.stream_message('請再回答一次 "OK"'):
             second_chunks.append(chunk)
 

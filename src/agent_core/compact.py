@@ -8,10 +8,10 @@
 from __future__ import annotations
 
 import logging
-from typing import Any, cast
 
 from agent_core.providers.base import LLMProvider
 from agent_core.token_counter import TokenCounter
+from agent_core.types import CompactResult, ContentBlock, MessageParam
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +28,7 @@ _SUMMARIZE_SYSTEM_PROMPT: str = (
 )
 
 
-def _has_block_type(content: list[dict[str, Any]], block_type: str) -> bool:
+def _has_block_type(content: list[ContentBlock], block_type: str) -> bool:
     """檢查 content list 中是否包含指定 type 的 block。"""
     for block in content:
         if block.get('type') == block_type:
@@ -37,7 +37,7 @@ def _has_block_type(content: list[dict[str, Any]], block_type: str) -> bool:
 
 
 def _find_tool_result_rounds(
-    conversation: list[dict[str, Any]],
+    conversation: list[MessageParam],
 ) -> list[int]:
     """找出所有含 tool_result 的 user 訊息索引。
 
@@ -46,18 +46,18 @@ def _find_tool_result_rounds(
     """
     indices: list[int] = []
     for i, msg in enumerate(conversation):
-        if msg.get('role') != 'user':
+        if msg['role'] != 'user':
             continue
-        content = msg.get('content')
+        content = msg['content']
         if not isinstance(content, list):
             continue
-        if _has_block_type(cast(list[dict[str, Any]], content), 'tool_result'):
+        if _has_block_type(content, 'tool_result'):
             indices.append(i)
     return indices
 
 
 def truncate_tool_results(
-    conversation: list[dict[str, Any]],
+    conversation: list[MessageParam],
     preserve_last_n_rounds: int = 1,
 ) -> int:
     """Phase 1: 截斷舊的 tool_result 內容。
@@ -88,11 +88,11 @@ def truncate_tool_results(
         raw_content = conversation[idx]['content']
         if not isinstance(raw_content, list):
             continue
-        for block in cast(list[dict[str, Any]], raw_content):
-            if block.get('type') != 'tool_result':
+        for block in raw_content:
+            if block['type'] != 'tool_result':
                 continue
             # 跳過已截斷的
-            if block.get('content') == TRUNCATED_MARKER:
+            if block['content'] == TRUNCATED_MARKER:
                 continue
             block['content'] = TRUNCATED_MARKER
             truncated_count += 1
@@ -107,7 +107,7 @@ def truncate_tool_results(
 
 
 def _find_safe_split_point(
-    conversation: list[dict[str, Any]],
+    conversation: list[MessageParam],
     keep_last_n: int,
 ) -> int:
     """找到安全的摘要切割點。
@@ -132,17 +132,17 @@ def _find_safe_split_point(
     # 向前調整直到找到安全的邊界
     while split > 0:
         msg = conversation[split]
-        raw_content = msg.get('content')
+        content = msg['content']
 
         # 如果是 user 訊息且含 tool_result，往前移
-        if msg.get('role') == 'user' and isinstance(raw_content, list):
-            if _has_block_type(cast(list[dict[str, Any]], raw_content), 'tool_result'):
+        if msg['role'] == 'user' and isinstance(content, list):
+            if _has_block_type(content, 'tool_result'):
                 split -= 1
                 continue
 
         # 如果是 assistant 訊息且含 tool_use，要連帶下一則 tool_result
-        if msg.get('role') == 'assistant' and isinstance(raw_content, list):
-            if _has_block_type(cast(list[dict[str, Any]], raw_content), 'tool_use'):
+        if msg['role'] == 'assistant' and isinstance(content, list):
+            if _has_block_type(content, 'tool_use'):
                 split -= 1
                 continue
 
@@ -151,7 +151,7 @@ def _find_safe_split_point(
     return split
 
 
-def _format_block(block: dict[str, Any], text_parts: list[str]) -> None:
+def _format_block(block: ContentBlock, text_parts: list[str]) -> None:
     """格式化單一 content block 為摘要用文字。"""
     block_type = block.get('type', '')
     if block_type == 'text':
@@ -167,18 +167,18 @@ def _format_block(block: dict[str, Any], text_parts: list[str]) -> None:
             text_parts.append(f'[工具結果: {preview}...]')
 
 
-def _format_messages_for_summary(messages: list[dict[str, Any]]) -> str:
+def _format_messages_for_summary(messages: list[MessageParam]) -> str:
     """將訊息列表格式化為摘要用的文字。"""
     parts: list[str] = []
     for msg in messages:
-        role = msg.get('role', 'unknown')
-        content = msg.get('content', '')
+        role = msg['role']
+        content = msg['content']
 
         if isinstance(content, str):
             parts.append(f'{role}: {content}')
-        elif isinstance(content, list):
+        else:
             text_parts: list[str] = []
-            for block in cast(list[dict[str, Any]], content):
+            for block in content:
                 _format_block(block, text_parts)
             parts.append(f'{role}: {" ".join(text_parts)}')
 
@@ -186,7 +186,7 @@ def _format_messages_for_summary(messages: list[dict[str, Any]]) -> str:
 
 
 async def summarize_conversation(
-    conversation: list[dict[str, Any]],
+    conversation: list[MessageParam],
     provider: LLMProvider,
     system_prompt: str,
     keep_last_n: int = 4,
@@ -215,7 +215,7 @@ async def summarize_conversation(
     early_messages = conversation[:split_point]
 
     # 建立摘要請求
-    summary_request: list[dict[str, Any]] = [
+    summary_request: list[MessageParam] = [
         {
             'role': 'user',
             'content': (
@@ -238,7 +238,7 @@ async def summarize_conversation(
             summary_text += str(block.get('text', ''))
 
     # 替換早期對話為摘要
-    summary_messages: list[dict[str, Any]] = [
+    summary_messages: list[MessageParam] = [
         {'role': 'user', 'content': f'以下是先前對話的摘要：\n{summary_text}'},
         {
             'role': 'assistant',
@@ -262,11 +262,11 @@ async def summarize_conversation(
 
 
 async def compact_conversation(
-    conversation: list[dict[str, Any]],
+    conversation: list[MessageParam],
     provider: LLMProvider,
     system_prompt: str,
     token_counter: TokenCounter,
-) -> dict[str, Any]:
+) -> CompactResult:
     """完整 compact 流程。
 
     依序執行 Phase 1（截斷 tool_result）和 Phase 2（LLM 摘要），
@@ -279,9 +279,9 @@ async def compact_conversation(
         token_counter: Token 計數器
 
     Returns:
-        壓縮結果字典 {truncated: int, summarized: bool, summary: str | None}
+        壓縮結果
     """
-    result: dict[str, Any] = {
+    result: CompactResult = {
         'truncated': 0,
         'summarized': False,
         'summary': None,

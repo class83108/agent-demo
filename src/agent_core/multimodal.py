@@ -10,6 +10,8 @@ import math
 from dataclasses import dataclass
 from typing import Any
 
+from agent_core.types import ContentBlock, DocumentBlock, ImageBlock, TextBlock
+
 logger = logging.getLogger(__name__)
 
 # 支援的 media types
@@ -100,7 +102,7 @@ def validate_attachment(attachment: Attachment) -> None:
                 )
 
 
-def _attachment_to_block(attachment: Attachment) -> dict[str, Any]:
+def _attachment_to_block(attachment: Attachment) -> ImageBlock | DocumentBlock:
     """將附件轉換為 Anthropic content block。
 
     Args:
@@ -109,12 +111,6 @@ def _attachment_to_block(attachment: Attachment) -> dict[str, Any]:
     Returns:
         Anthropic API 格式的 content block
     """
-    # 決定 block type：圖片用 "image"，PDF 用 "document"
-    if attachment.media_type in SUPPORTED_IMAGE_TYPES:
-        block_type = 'image'
-    else:
-        block_type = 'document'
-
     # 建立 source
     if attachment.url is not None:
         source: dict[str, Any] = {
@@ -128,13 +124,16 @@ def _attachment_to_block(attachment: Attachment) -> dict[str, Any]:
             'data': attachment.data,
         }
 
-    return {'type': block_type, 'source': source}
+    # 圖片用 ImageBlock，PDF 用 DocumentBlock
+    if attachment.media_type in SUPPORTED_IMAGE_TYPES:
+        return ImageBlock(type='image', source=source)
+    return DocumentBlock(type='document', source=source)
 
 
 def build_content_blocks(
     text: str,
     attachments: list[Attachment] | None,
-) -> str | list[dict[str, Any]]:
+) -> str | list[ContentBlock]:
     """將文字與附件組合為 Anthropic messages content。
 
     無附件時回傳純文字字串（向後相容）。
@@ -150,13 +149,13 @@ def build_content_blocks(
     if not attachments:
         return text
 
-    blocks: list[dict[str, Any]] = []
+    blocks: list[ContentBlock] = []
 
     # 附件在前、文字在後（符合 Anthropic 最佳實踐）
     for attachment in attachments:
         validate_attachment(attachment)
         blocks.append(_attachment_to_block(attachment))
 
-    blocks.append({'type': 'text', 'text': text})
+    blocks.append(TextBlock(type='text', text=text))
 
     return blocks

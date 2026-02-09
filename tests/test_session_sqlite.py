@@ -17,6 +17,7 @@ import allure
 import pytest
 
 from agent_core.session.sqlite_backend import SQLiteSessionBackend
+from agent_core.types import MessageParam
 
 # =============================================================================
 # Fixtures
@@ -35,7 +36,7 @@ async def backend(db_path: Path) -> SQLiteSessionBackend:
     return SQLiteSessionBackend(db_path=str(db_path))
 
 
-def _sample_conversation() -> list[dict[str, Any]]:
+def _sample_conversation() -> list[MessageParam]:
     """建立範例對話歷史。"""
     return [
         {'role': 'user', 'content': 'Hello'},
@@ -165,7 +166,7 @@ class TestSQLiteComplexMessages:
     @allure.title('儲存包含 tool_use 與 tool_result 的對話')
     async def test_tool_use_and_tool_result_preserved(self, backend: SQLiteSessionBackend) -> None:
         """Scenario: 儲存包含 tool_use 與 tool_result 的對話。"""
-        conversation: list[dict[str, Any]] = [
+        conversation: list[MessageParam] = [
             {'role': 'user', 'content': '請讀取 main.py'},
             {
                 'role': 'assistant',
@@ -199,14 +200,16 @@ class TestSQLiteComplexMessages:
         assert result == conversation
 
         # 驗證 tool_use 區塊完整
-        tool_use_block = result[1]['content'][1]
+        assistant_content: Any = result[1]['content']
+        tool_use_block: Any = assistant_content[1]
         assert tool_use_block['type'] == 'tool_use'
         assert tool_use_block['id'] == 'tool_1'
         assert tool_use_block['name'] == 'read_file'
         assert tool_use_block['input'] == {'path': 'main.py'}
 
         # 驗證 tool_result 區塊完整
-        tool_result_block = result[2]['content'][0]
+        user_content: Any = result[2]['content']
+        tool_result_block: Any = user_content[0]
         assert tool_result_block['type'] == 'tool_result'
         assert tool_result_block['tool_use_id'] == 'tool_1'
         assert tool_result_block['is_error'] is False

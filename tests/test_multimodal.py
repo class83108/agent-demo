@@ -29,6 +29,7 @@ from agent_core.multimodal import (
     validate_attachment,
 )
 from agent_core.providers.base import FinalMessage, StreamResult, UsageInfo
+from agent_core.types import MessageParam
 
 # --- Mock Helpers ---
 
@@ -66,7 +67,7 @@ class MockProvider:
     @asynccontextmanager
     async def stream(
         self,
-        messages: list[dict[str, Any]],
+        messages: list[MessageParam],
         system: str,
         tools: list[dict[str, Any]] | None = None,
         max_tokens: int = 8192,
@@ -87,7 +88,7 @@ class MockProvider:
 
     async def count_tokens(
         self,
-        messages: list[dict[str, Any]],
+        messages: list[MessageParam],
         system: str,
         tools: list[dict[str, Any]] | None = None,
         max_tokens: int = 8192,
@@ -96,7 +97,7 @@ class MockProvider:
 
     async def create(
         self,
-        messages: list[dict[str, Any]],
+        messages: list[MessageParam],
         system: str,
         max_tokens: int = 8192,
     ) -> FinalMessage:
@@ -144,7 +145,7 @@ class TestMultimodalImageInput:
         # 對話歷史應包含 image 區塊
         user_msg = agent.conversation[0]
         assert user_msg['role'] == 'user'
-        content: list[dict[str, Any]] = user_msg['content']
+        content = user_msg['content']
         assert isinstance(content, list)
 
         content_types = [b['type'] for b in content]
@@ -162,7 +163,7 @@ class TestMultimodalImageInput:
 
         assert result == '看到了'
         user_msg = agent.conversation[0]
-        content: list[dict[str, Any]] = user_msg['content']
+        content = user_msg['content']
         assert isinstance(content, list)
 
         image_block = [b for b in content if b['type'] == 'image'][0]
@@ -182,7 +183,7 @@ class TestMultimodalImageInput:
         await _collect_stream(agent, '比較這兩張', attachments=attachments)
 
         user_msg = agent.conversation[0]
-        content: list[dict[str, Any]] = user_msg['content']
+        content = user_msg['content']
         assert isinstance(content, list)
 
         image_blocks = [b for b in content if b['type'] == 'image']
@@ -212,7 +213,7 @@ class TestMultimodalPDFInput:
 
         assert result == 'PDF 內容'
         user_msg = agent.conversation[0]
-        content: list[dict[str, Any]] = user_msg['content']
+        content = user_msg['content']
         assert isinstance(content, list)
 
         doc_blocks = [b for b in content if b['type'] == 'document']
@@ -414,7 +415,7 @@ class TestMultimodalConversationHistory:
 
         # user 訊息包含 image + text blocks
         user_msg = agent.conversation[0]
-        content: list[dict[str, Any]] = user_msg['content']
+        content = user_msg['content']
         assert isinstance(content, list)
         assert any(b['type'] == 'image' for b in content)
 
@@ -432,8 +433,8 @@ class TestMultimodalConversationHistory:
         await _collect_stream(agent, '看圖', attachments=attachments)
 
         # 檢查 Provider 收到的 messages（第一個 user message）
-        sent_messages = provider.call_args_list[0]['messages']
+        sent_messages: list[MessageParam] = provider.call_args_list[0]['messages']
         user_msg = next(m for m in sent_messages if m['role'] == 'user')
-        user_content: list[dict[str, Any]] = user_msg['content']
+        user_content = user_msg['content']
         assert isinstance(user_content, list)
         assert any(b['type'] == 'image' for b in user_content)

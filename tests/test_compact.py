@@ -20,13 +20,14 @@ from agent_core.compact import (
 )
 from agent_core.providers.base import FinalMessage, UsageInfo
 from agent_core.token_counter import TokenCounter
+from agent_core.types import MessageParam
 
 # =============================================================================
 # Helper: 建立測試用對話歷史
 # =============================================================================
 
 
-def _make_tool_use_assistant(tool_id: str, tool_name: str = 'read_file') -> dict[str, Any]:
+def _make_tool_use_assistant(tool_id: str, tool_name: str = 'read_file') -> MessageParam:
     """建立含 tool_use 的 assistant 訊息。"""
     return {
         'role': 'assistant',
@@ -36,9 +37,7 @@ def _make_tool_use_assistant(tool_id: str, tool_name: str = 'read_file') -> dict
     }
 
 
-def _make_tool_result_user(
-    tool_id: str, result_content: str = '工具執行結果內容'
-) -> dict[str, Any]:
+def _make_tool_result_user(tool_id: str, result_content: str = '工具執行結果內容') -> MessageParam:
     """建立含 tool_result 的 user 訊息。"""
     return {
         'role': 'user',
@@ -48,7 +47,7 @@ def _make_tool_result_user(
     }
 
 
-def _make_conversation_with_tools() -> list[dict[str, Any]]:
+def _make_conversation_with_tools() -> list[MessageParam]:
     """建立包含多輪工具調用的對話歷史。
 
     結構：
@@ -102,12 +101,12 @@ class TestTruncateToolResults:
         assert truncated_count == 2
 
         # tool_1 的結果應被替換
-        tool_result_1 = conversation[2]['content'][0]
-        assert tool_result_1['content'] == TRUNCATED_MARKER
+        content_2: Any = conversation[2]['content']
+        assert content_2[0]['content'] == TRUNCATED_MARKER
 
         # tool_2 的結果應被替換
-        tool_result_2 = conversation[6]['content'][0]
-        assert tool_result_2['content'] == TRUNCATED_MARKER
+        content_6: Any = conversation[6]['content']
+        assert content_6[0]['content'] == TRUNCATED_MARKER
 
     @allure.title('保留最近一輪的 tool_result')
     def test_truncate_preserves_recent_tool_results(self) -> None:
@@ -117,8 +116,8 @@ class TestTruncateToolResults:
         truncate_tool_results(conversation, preserve_last_n_rounds=1)
 
         # tool_3（最近一輪）不應被截斷
-        tool_result_3 = conversation[10]['content'][0]
-        assert tool_result_3['content'] == '最新的工具結果'
+        content_10: Any = conversation[10]['content']
+        assert content_10[0]['content'] == '最新的工具結果'
 
     @allure.title('對應的 tool_use block 應保留不變')
     def test_truncate_preserves_tool_use_blocks(self) -> None:
@@ -128,14 +127,14 @@ class TestTruncateToolResults:
         truncate_tool_results(conversation, preserve_last_n_rounds=1)
 
         # tool_use block 不應被修改
-        tool_use_1 = conversation[1]['content'][0]
-        assert tool_use_1['type'] == 'tool_use'
-        assert tool_use_1['id'] == 'tool_1'
+        content_1: Any = conversation[1]['content']
+        assert content_1[0]['type'] == 'tool_use'
+        assert content_1[0]['id'] == 'tool_1'
 
     @allure.title('無 tool_result 時不變')
     def test_truncate_no_tool_results_unchanged(self) -> None:
         """Scenario: 無 tool_result 時不變。"""
-        conversation = [
+        conversation: list[MessageParam] = [
             {'role': 'user', 'content': '你好'},
             {'role': 'assistant', 'content': [{'type': 'text', 'text': '你好！'}]},
         ]
@@ -172,7 +171,7 @@ class TestSummarizeConversation:
     @allure.title('摘要早期對話')
     async def test_summarize_early_conversation(self) -> None:
         """Scenario: 摘要早期對話。"""
-        conversation = [
+        conversation: list[MessageParam] = [
             {'role': 'user', 'content': '第一輪問題'},
             {'role': 'assistant', 'content': [{'type': 'text', 'text': '第一輪回答'}]},
             {'role': 'user', 'content': '第二輪問題'},
@@ -214,7 +213,7 @@ class TestSummarizeConversation:
     @allure.title('保留最近的訊息不被摘要')
     async def test_summarize_preserves_recent_messages(self) -> None:
         """Scenario: 保留最近的訊息不被摘要。"""
-        conversation = [
+        conversation: list[MessageParam] = [
             {'role': 'user', 'content': '舊問題'},
             {'role': 'assistant', 'content': [{'type': 'text', 'text': '舊回答'}]},
             {'role': 'user', 'content': '新問題'},
@@ -242,7 +241,7 @@ class TestSummarizeConversation:
     @allure.title('訊息數不足時不應進行摘要')
     async def test_summarize_not_enough_messages_to_summarize(self) -> None:
         """訊息數不足時不應進行摘要。"""
-        conversation = [
+        conversation: list[MessageParam] = [
             {'role': 'user', 'content': '問題'},
             {'role': 'assistant', 'content': [{'type': 'text', 'text': '回答'}]},
         ]
@@ -263,7 +262,7 @@ class TestSummarizeConversation:
     @allure.title('摘要切點應在完整 conversation round 邊界，不拆散 tool_use/tool_result 配對')
     async def test_summarize_respects_tool_use_boundaries(self) -> None:
         """摘要切點應在完整 conversation round 邊界，不拆散 tool_use/tool_result 配對。"""
-        conversation = [
+        conversation: list[MessageParam] = [
             {'role': 'user', 'content': '舊問題'},
             {'role': 'assistant', 'content': [{'type': 'text', 'text': '舊回答'}]},
             {'role': 'user', 'content': '請使用工具'},
@@ -331,7 +330,7 @@ class TestCompactConversation:
     async def test_compact_full_pipeline(self) -> None:
         """Scenario: Phase 1 不足時觸發 Phase 2。"""
         # 建立較長的對話，Phase 1 截斷後仍然超過閾值
-        conversation: list[dict[str, Any]] = [
+        conversation: list[MessageParam] = [
             {'role': 'user', 'content': '早期問題 1'},
             {'role': 'assistant', 'content': [{'type': 'text', 'text': '早期回答 1'}]},
             {'role': 'user', 'content': '早期問題 2'},
