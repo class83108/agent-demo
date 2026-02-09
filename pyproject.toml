@@ -61,7 +61,10 @@ testpaths = ["tests"]
 pythonpath = ["src"]
 addopts = ["-v", "--cov=src/agent_core", "--cov=src/agent_app", "--cov-report=term-missing", "--cov-report=xml"]
 asyncio_mode = "auto"
-markers = ["smoke: 手動 smoke test，需要真實 API（使用 --run-smoke 執行）"]
+markers = [
+    "smoke: 手動 smoke test，需要真實 API（使用 --run-smoke 執行）",
+    "eval: Agent 能力評估測試，需要真實 API（使用 --run-eval 執行）",
+]
 
 # Coverage 配置
 [tool.coverage.run]

@@ -87,6 +87,24 @@ API 呼叫失敗（429 rate limit、網路閃斷）很常見，目前一失敗�
 | 多 Provider | 支援 OpenAI、Gemini 等 | Protocol 已設計好，需要時再加 |
 | Cost tracking | 費用追蹤 | `UsageInfo` 已回傳 token 數，加累加器即可 |
 | Guardrails | 輸入輸出過濾 | 可先透過 Skill 的 system prompt 做基本防護 |
+| Memory（agent.md） | 專案知識檔，Agent 啟動時自動載入 | 參考 Claude Code 的 CLAUDE.md pattern，見優化方向 4a |
+| Memory（Working Memory） | 任務內暫存區工具，記錄搜索發現 | 見優化方向 4b |
+| Memory（跨 Session） | SQLite 持久化的結構化記憶 | 等 4a 驗證有效後再做，需先定義「什麼值得記住」 |
+
+---
+
+## Agent 優化（Eval 驅動）
+
+v1-baseline 結果：9/10 通過、avg 0.91。詳細優化方向見 `.claude/plans/elegant-crafting-flame.md`。
+
+| 優先級 | 方向 | 目標任務 | 狀態 |
+|--------|------|----------|------|
+| P0 | System Prompt 強化（工作流程 + 工具指引 + 風格一致性 + TDD） | T7/T8/T9/T10 | 待做 |
+| P1 | 工具描述優化（任務導向描述） | T7 | 待做 |
+| P1 | Max Iterations 上限（防止失控迴圈） | 全局 | 待做 |
+| P2 | agent.md 專案知識檔 | T8/T10 | 待做 |
+| P2 | Working Memory 工具 | T7/T9 | 待做 |
+| P3 | 模型選擇策略 A/B 測試 | 全局 | 待做 |
 
 ---
 
