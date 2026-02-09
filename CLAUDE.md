@@ -6,11 +6,30 @@
 - 所有函數、方法必須使用型別註解
 - 使用 `from __future__ import annotations` 啟用延遲評估
 - 複雜型別使用 `typing` 模組 (如 `Optional`, `Union`, `TypeVar`)
+- **優先定義型別，避免使用 `cast()`**：遇到型別不符時，應先考慮能否透過以下方式解決，而非直接使用 `cast()`：
+  1. 定義 TypedDict（搭配 `Literal` 做 discriminated union）
+  2. 縮窄函數參數型別（例如 `ContentBlock` → `ToolUseBlock`）
+  3. 使用 `['key']` 存取（而非 `.get('key')`）以啟用 discriminated union narrowing
+  4. 使用 `TypeGuard` 輔助函數
+  5. `cast()` 僅用於反序列化邊界（如 `json.loads`、`model_dump`）
 
 ```python
-# 正確
-def process_message(content: str, max_tokens: int = 1000) -> dict[str, Any]:
-    ...
+# 正確：定義精確的 TypedDict，讓 pyright 自動窄化
+class ToolUseBlock(TypedDict):
+    type: Literal['tool_use']
+    id: str
+    name: str
+
+def execute_tool(block: ToolUseBlock) -> None:
+    tool_name = block['name']  # pyright 知道這是 str
+
+# 正確：用 ['type'] 啟用 discriminated union narrowing
+if block['type'] == 'tool_use':
+    # pyright 自動窄化 block 為 ToolUseBlock
+
+# 錯誤：用 .get('type') 無法觸發 narrowing
+if block.get('type') == 'tool_use':
+    name = cast(str, block['name'])  # 需要 cast
 
 # 錯誤
 def process_message(content, max_tokens=1000):
