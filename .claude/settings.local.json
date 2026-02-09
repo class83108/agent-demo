@@ -9,7 +9,8 @@
       "Bash(ls:*)",
       "Bash(git mv:*)",
       "Bash(xargs perl:*)",
-      "Bash(git -C /Users/nb050/agent-demo log --oneline -5)"
+      "Bash(git -C /Users/nb050/agent-demo log --oneline -5)",
+      "Bash(uv run ruff format:*)"
     ]
   }
 }
