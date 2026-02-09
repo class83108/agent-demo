@@ -25,6 +25,7 @@ mcp = [
 dev = [
     { name = "fastapi" },
     { name = "httpx" },
+    { name = "mcp" },
     { name = "pre-commit" },
     { name = "pyright" },
     { name = "pytest" },
@@ -50,6 +51,7 @@ provides-extras = ["app", "mcp"]
 dev = [
     { name = "fastapi", specifier = ">=0.128.0" },
     { name = "httpx", specifier = ">=0.28.1" },
+    { name = "mcp", specifier = ">=1.26.0" },
     { name = "pre-commit", specifier = ">=4.5.1" },
     { name = "pyright", specifier = ">=1.1.408" },
     { name = "pytest", specifier = ">=9.0.2" },
