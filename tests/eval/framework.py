@@ -182,17 +182,28 @@ class EvalRunner:
         self.enable_memory = enable_memory
         self._prompt_hash = compute_prompt_hash(system_prompt)
 
-    def _create_agent(self, sandbox: Path) -> Agent:
+    def _create_agent(
+        self,
+        sandbox: Path,
+        tools_config: dict[str, Any] | None = None,
+    ) -> Agent:
         """建立含完整工具的 Agent。
 
         Args:
             sandbox: sandbox 目錄路徑
+            tools_config: 任務特定的工具配置（來自 TOOLS_CONFIG）
 
         Returns:
             已配置的 Agent 實例
         """
+        config_dict = tools_config or {}
         memory_dir = sandbox / '.memories' if self.enable_memory else None
-        registry = create_default_registry(sandbox, memory_dir=memory_dir)
+        registry = create_default_registry(
+            sandbox,
+            memory_dir=memory_dir,
+            web_fetch_allowed_hosts=config_dict.get('web_fetch_allowed_hosts'),
+            tavily_api_key=config_dict.get('tavily_api_key', ''),
+        )
         config = AgentCoreConfig(
             provider=ProviderConfig(model=self.model),
             system_prompt=self.system_prompt,
@@ -225,8 +236,9 @@ class EvalRunner:
         # 步驟 1: 設定 sandbox
         task_module.setup(sandbox)
 
-        # 步驟 2: 建立 Agent
-        agent = self._create_agent(sandbox)
+        # 步驟 2: 建立 Agent（讀取任務模組的 TOOLS_CONFIG）
+        tools_config: dict[str, Any] = getattr(task_module, 'TOOLS_CONFIG', {})
+        agent = self._create_agent(sandbox, tools_config=tools_config)
 
         # 步驟 3: 執行 Agent（含超時控制）
         events: list[AgentEvent] = []

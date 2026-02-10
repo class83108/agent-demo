@@ -20,6 +20,7 @@ from agent_core.tools.file_list import list_files_handler
 from agent_core.tools.file_read import read_file_handler
 from agent_core.tools.grep_search import grep_search_handler
 from agent_core.tools.registry import ToolRegistry
+from agent_core.tools.think import think_handler
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +29,8 @@ def create_default_registry(
     sandbox_root: Path,
     lock_provider: Any | None = None,
     memory_dir: Path | None = None,
+    web_fetch_allowed_hosts: list[str] | None = None,
+    tavily_api_key: str = '',
 ) -> ToolRegistry:
     """建立預設的工具註冊表，包含所有內建工具。
 
@@ -35,6 +38,8 @@ def create_default_registry(
         sandbox_root: sandbox 根目錄，用於限制檔案操作範圍
         lock_provider: 鎖提供者（可選，用於避免檔案競爭）
         memory_dir: 記憶目錄（可選，提供時啟用 memory 工具）
+        web_fetch_allowed_hosts: 允許存取的主機清單（提供時啟用 web_fetch 工具）
+        tavily_api_key: Tavily API key（提供時啟用 web_search 工具）
 
     Returns:
         已註冊所有內建工具的 ToolRegistry
@@ -56,9 +61,20 @@ def create_default_registry(
     # 註冊 grep_search 工具
     _register_grep_search(registry, sandbox_root)
 
+    # 註冊 think 工具
+    _register_think(registry)
+
     # 註冊 memory 工具（可選）
     if memory_dir is not None:
         _register_memory(registry, memory_dir)
+
+    # 註冊 web_fetch 工具（可選）
+    if web_fetch_allowed_hosts is not None:
+        _register_web_fetch(registry, web_fetch_allowed_hosts)
+
+    # 註冊 web_search 工具（可選）
+    if tavily_api_key:
+        _register_web_search(registry, tavily_api_key)
 
     logger.info('預設工具註冊表已建立', extra={'tools': registry.list_tools()})
     return registry
@@ -447,6 +463,38 @@ def _register_grep_search(registry: ToolRegistry, sandbox_root: Path) -> None:
     )
 
 
+def _register_think(registry: ToolRegistry) -> None:
+    """註冊 think 工具。
+
+    Args:
+        registry: 工具註冊表
+    """
+    registry.register(
+        name='think',
+        description="""\
+記錄你的思考過程。
+
+使用時機：
+- 面對複雜任務時，拆解步驟前先整理思路
+- 分析多個方案的優缺點
+- 遇到歧義時，釐清假設和推理依據
+
+此工具不會產生任何副作用，純粹用於結構化你的思考。
+思考內容會保留在對話歷史中，有助於保持推理的連貫性。""",
+        parameters={
+            'type': 'object',
+            'properties': {
+                'thought': {
+                    'type': 'string',
+                    'description': '你的思考內容（推理步驟、分析、假設等）',
+                },
+            },
+            'required': ['thought'],
+        },
+        handler=think_handler,
+    )
+
+
 def _register_memory(registry: ToolRegistry, memory_dir: Path) -> None:
     """註冊 memory 工具。
 
@@ -461,4 +509,113 @@ def _register_memory(registry: ToolRegistry, memory_dir: Path) -> None:
         description=MEMORY_TOOL_DESCRIPTION,
         parameters=MEMORY_TOOL_PARAMETERS,
         handler=handler,
+    )
+
+
+def _register_web_fetch(registry: ToolRegistry, allowed_hosts: list[str]) -> None:
+    """註冊 web_fetch 工具。
+
+    Args:
+        registry: 工具註冊表
+        allowed_hosts: 允許存取的主機清單
+    """
+    from agent_core.tools.web_fetch import web_fetch_handler
+
+    async def _handler(
+        url: str,
+        timeout: int = 30,
+        max_size: int = 1_000_000,
+    ) -> dict[str, Any]:
+        return await web_fetch_handler(
+            url=url,
+            timeout=timeout,
+            max_size=max_size,
+            allowed_hosts=allowed_hosts,
+        )
+
+    registry.register(
+        name='web_fetch',
+        description="""\
+擷取網頁內容並轉換為可讀文字。
+
+使用時機：
+- 查閱線上文件或 API 參考
+- 從網頁擷取特定資訊
+- 探索網站結構（回傳頁面中的連結清單）
+
+回傳內容包含：頁面標題、純文字內容、頁面中的所有連結。
+限制：僅支援 http/https，有大小（1MB）和超時（30秒）限制。""",
+        parameters={
+            'type': 'object',
+            'properties': {
+                'url': {
+                    'type': 'string',
+                    'description': '要擷取的網頁 URL（http 或 https）',
+                },
+                'timeout': {
+                    'type': 'integer',
+                    'description': '超時秒數（預設 30）',
+                },
+            },
+            'required': ['url'],
+        },
+        handler=_handler,
+    )
+
+
+def _register_web_search(registry: ToolRegistry, api_key: str) -> None:
+    """註冊 web_search 工具。
+
+    Args:
+        registry: 工具註冊表
+        api_key: Tavily API key
+    """
+    from agent_core.tools.web_search import web_search_handler
+
+    async def _handler(
+        query: str,
+        max_results: int = 5,
+        search_depth: str = 'basic',
+        topic: str = 'general',
+    ) -> dict[str, Any]:
+        return await web_search_handler(
+            query=query,
+            max_results=max_results,
+            search_depth=search_depth,
+            topic=topic,
+            api_key=api_key,
+        )
+
+    registry.register(
+        name='web_search',
+        description="""\
+搜尋網路並回傳結構化結果。
+
+使用時機：
+- 查找特定主題的最新資訊
+- 搜尋技術文件、套件用法、API 參考
+- 獲取問題的背景知識
+
+回傳內容包含：AI 摘要回答、搜尋結果清單（標題、URL、摘要）。
+搭配 web_fetch 使用：先搜尋找到相關頁面，再用 web_fetch 深入閱讀。""",
+        parameters={
+            'type': 'object',
+            'properties': {
+                'query': {
+                    'type': 'string',
+                    'description': '搜尋查詢字串',
+                },
+                'max_results': {
+                    'type': 'integer',
+                    'description': '最大結果數量（預設 5）',
+                },
+                'topic': {
+                    'type': 'string',
+                    'enum': ['general', 'news', 'finance'],
+                    'description': '搜尋主題分類（預設 general）',
+                },
+            },
+            'required': ['query'],
+        },
+        handler=_handler,
     )

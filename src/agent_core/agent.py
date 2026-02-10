@@ -251,6 +251,8 @@ class Agent:
             ProviderTimeoutError: Provider 回應超時
         """
         response_parts: list[str] = []
+        iteration = 0
+        max_iterations = self.config.max_tool_iterations
 
         try:
             while True:
@@ -291,6 +293,18 @@ class Agent:
 
                 async for event in self._execute_tool_calls(final_message):
                     yield event
+
+                iteration += 1
+                if iteration >= max_iterations:
+                    logger.warning(
+                        '工具調用迴圈達到上限',
+                        extra={'max_iterations': max_iterations},
+                    )
+                    yield AgentEvent(
+                        type='max_iterations',
+                        data={'iterations': iteration},
+                    )
+                    break
 
                 response_parts = []
 

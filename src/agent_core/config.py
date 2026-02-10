@@ -90,7 +90,9 @@ class AgentCoreConfig:
     Attributes:
         provider: LLM Provider 配置
         system_prompt: 系統提示詞
+        max_tool_iterations: 工具調用迴圈最大迭代次數（防止失控）
     """
 
     provider: ProviderConfig = field(default_factory=ProviderConfig)
     system_prompt: str = DEFAULT_SYSTEM_PROMPT
+    max_tool_iterations: int = 25

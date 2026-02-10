@@ -578,6 +578,58 @@ class TestToolUseLoop:
 
         assert result == '找不到該檔案。'
 
+    @allure.title('工具迴圈達到 max_tool_iterations 時應停止')
+    async def test_tool_loop_stops_at_max_iterations(self) -> None:
+        """Scenario: 工具迴圈達到上限時應停止並 yield max_iterations 事件。"""
+        registry = ToolRegistry()
+        registry.register(
+            name='read_file',
+            description='讀取檔案',
+            parameters={
+                'type': 'object',
+                'properties': {'path': {'type': 'string'}},
+                'required': ['path'],
+            },
+            handler=lambda path: {'content': f'內容: {path}'},  # type: ignore[reportUnknownLambdaType]
+        )
+
+        max_iter = 3
+        # 建立 max_iter + 1 個 tool_use 回應（上限應在第 max_iter 輪後觸發）
+        tool_content: list[ContentBlock] = [
+            {
+                'type': 'tool_use',
+                'id': 'tool_x',
+                'name': 'read_file',
+                'input': {'path': 'file.py'},
+            }
+        ]
+        responses: list[tuple[list[str], FinalMessage]] = []
+        for _ in range(max_iter + 1):
+            responses.append(
+                ([], _make_final_message(content=tool_content, stop_reason='tool_use'))
+            )
+
+        provider = MockProvider(responses)
+        config = AgentCoreConfig(
+            provider=ProviderConfig(api_key='sk-test'),
+            system_prompt='test',
+            max_tool_iterations=max_iter,
+        )
+        agent = Agent(config=config, provider=provider, tool_registry=registry)
+
+        events: list[AgentEvent] = []
+        async for item in agent.stream_message('重複讀檔'):
+            if isinstance(item, dict):
+                events.append(item)
+
+        # 應有 max_iterations 事件
+        max_iter_events = [e for e in events if e.get('type') == 'max_iterations']
+        assert len(max_iter_events) == 1
+        assert max_iter_events[0]['data']['iterations'] == max_iter
+
+        # Provider 應被呼叫 max_iter 次（每輪一次 LLM 呼叫，第 max_iter 輪後中斷）
+        assert len(provider.call_args_list) == max_iter
+
 
 # =============================================================================
 # Rule: Agent 應透過 Provider 抽象層呼叫 LLM

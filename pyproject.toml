@@ -10,7 +10,10 @@ readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
     "anthropic>=0.76.0",
+    "beautifulsoup4>=4.14.3",
+    "httpx>=0.28.1",
     "redis>=7.1.0",
+    "tavily-python>=0.7.21",
 ]
 
 [project.optional-dependencies]
