@@ -9,6 +9,11 @@ import logging
 from pathlib import Path
 from typing import Any
 
+from agent_core.memory import (
+    MEMORY_TOOL_DESCRIPTION,
+    MEMORY_TOOL_PARAMETERS,
+    create_memory_handler,
+)
 from agent_core.tools.bash import bash_handler
 from agent_core.tools.file_edit import edit_file_handler
 from agent_core.tools.file_list import list_files_handler
@@ -22,12 +27,14 @@ logger = logging.getLogger(__name__)
 def create_default_registry(
     sandbox_root: Path,
     lock_provider: Any | None = None,
+    memory_dir: Path | None = None,
 ) -> ToolRegistry:
     """建立預設的工具註冊表，包含所有內建工具。
 
     Args:
         sandbox_root: sandbox 根目錄，用於限制檔案操作範圍
         lock_provider: 鎖提供者（可選，用於避免檔案競爭）
+        memory_dir: 記憶目錄（可選，提供時啟用 memory 工具）
 
     Returns:
         已註冊所有內建工具的 ToolRegistry
@@ -48,6 +55,10 @@ def create_default_registry(
 
     # 註冊 grep_search 工具
     _register_grep_search(registry, sandbox_root)
+
+    # 註冊 memory 工具（可選）
+    if memory_dir is not None:
+        _register_memory(registry, memory_dir)
 
     logger.info('預設工具註冊表已建立', extra={'tools': registry.list_tools()})
     return registry
@@ -406,4 +417,21 @@ def _register_grep_search(registry: ToolRegistry, sandbox_root: Path) -> None:
         },
         handler=_handler,
         file_param=None,  # grep_search 是唯讀搜尋，不需要鎖定
+    )
+
+
+def _register_memory(registry: ToolRegistry, memory_dir: Path) -> None:
+    """註冊 memory 工具。
+
+    Args:
+        registry: 工具註冊表
+        memory_dir: 記憶目錄路徑
+    """
+    handler = create_memory_handler(memory_dir)
+
+    registry.register(
+        name='memory',
+        description=MEMORY_TOOL_DESCRIPTION,
+        parameters=MEMORY_TOOL_PARAMETERS,
+        handler=handler,
     )

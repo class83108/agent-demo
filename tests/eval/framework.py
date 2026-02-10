@@ -174,10 +174,12 @@ class EvalRunner:
         system_prompt: str,
         timeout_seconds: float = 300.0,
         model: str = 'claude-sonnet-4-20250514',
+        enable_memory: bool = False,
     ) -> None:
         self.system_prompt = system_prompt
         self.timeout_seconds = timeout_seconds
         self.model = model
+        self.enable_memory = enable_memory
         self._prompt_hash = compute_prompt_hash(system_prompt)
 
     def _create_agent(self, sandbox: Path) -> Agent:
@@ -189,7 +191,8 @@ class EvalRunner:
         Returns:
             已配置的 Agent 實例
         """
-        registry = create_default_registry(sandbox)
+        memory_dir = sandbox / '.memories' if self.enable_memory else None
+        registry = create_default_registry(sandbox, memory_dir=memory_dir)
         config = AgentCoreConfig(
             provider=ProviderConfig(model=self.model),
             system_prompt=self.system_prompt,

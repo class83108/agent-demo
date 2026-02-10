@@ -960,3 +960,128 @@ class TestCompactIntegration:
         assert len(compact_events) >= 1
         # compact 事件應包含壓縮結果資訊
         assert 'data' in compact_events[0]
+
+
+# =============================================================================
+# Memory 工具整合測試
+# =============================================================================
+
+
+@allure.feature('Memory Tool')
+class TestMemoryToolIntegration:
+    """測試 Memory 工具透過 Agent tool loop 正常運作。"""
+
+    @allure.title('Agent 透過 tool loop 執行 memory write 指令')
+    async def test_memory_write_via_tool_loop(self, tmp_path: Any) -> None:
+        """Scenario: Agent 使用 memory 工具寫入記憶檔案。"""
+        from agent_core.memory import (
+            MEMORY_TOOL_DESCRIPTION,
+            MEMORY_TOOL_PARAMETERS,
+            create_memory_handler,
+        )
+
+        memory_dir = tmp_path / 'memories'
+        handler = create_memory_handler(memory_dir)
+
+        registry = ToolRegistry()
+        registry.register(
+            name='memory',
+            description=MEMORY_TOOL_DESCRIPTION,
+            parameters=MEMORY_TOOL_PARAMETERS,
+            handler=handler,
+        )
+
+        # 第一次：tool_use（memory write）
+        tool_content: list[ContentBlock] = [
+            {
+                'type': 'tool_use',
+                'id': 'mem_1',
+                'name': 'memory',
+                'input': {
+                    'command': 'write',
+                    'path': 'notes.md',
+                    'content': '# 專案筆記\n發現重要線索',
+                },
+            }
+        ]
+        first_msg = _make_final_message(content=tool_content, stop_reason='tool_use')
+
+        # 第二次：最終文字回應
+        second_msg = _make_final_message('已記錄到記憶中。')
+
+        provider = MockProvider(
+            [
+                ([], first_msg),
+                (['已記錄到記憶中。'], second_msg),
+            ]
+        )
+        agent = _make_agent(provider, tool_registry=registry)
+
+        result = await collect_stream(agent, '請記錄這個發現')
+
+        assert result == '已記錄到記憶中。'
+
+        # 驗證檔案確實被寫入
+        notes_file = memory_dir / 'notes.md'
+        assert notes_file.exists()
+        assert '專案筆記' in notes_file.read_text(encoding='utf-8')
+
+        # 驗證 tool_result 在對話歷史中
+        tool_results: Any = agent.conversation[2]['content']
+        assert len(tool_results) == 1
+        assert tool_results[0]['tool_use_id'] == 'mem_1'
+        assert 'written successfully' in tool_results[0]['content']
+
+    @allure.title('Agent 透過 tool loop 執行 memory view 指令')
+    async def test_memory_view_via_tool_loop(self, tmp_path: Any) -> None:
+        """Scenario: Agent 使用 memory 工具查看記憶目錄。"""
+        from agent_core.memory import (
+            MEMORY_TOOL_DESCRIPTION,
+            MEMORY_TOOL_PARAMETERS,
+            create_memory_handler,
+        )
+
+        memory_dir = tmp_path / 'memories'
+        memory_dir.mkdir()
+        # 預先建立一個記憶檔案
+        (memory_dir / 'clues.md').write_text('線索內容', encoding='utf-8')
+
+        handler = create_memory_handler(memory_dir)
+
+        registry = ToolRegistry()
+        registry.register(
+            name='memory',
+            description=MEMORY_TOOL_DESCRIPTION,
+            parameters=MEMORY_TOOL_PARAMETERS,
+            handler=handler,
+        )
+
+        # 第一次：tool_use（memory view）
+        tool_content: list[ContentBlock] = [
+            {
+                'type': 'tool_use',
+                'id': 'mem_2',
+                'name': 'memory',
+                'input': {'command': 'view'},
+            }
+        ]
+        first_msg = _make_final_message(content=tool_content, stop_reason='tool_use')
+
+        # 第二次：最終文字回應
+        second_msg = _make_final_message('記憶目錄中有 clues.md 檔案。')
+
+        provider = MockProvider(
+            [
+                ([], first_msg),
+                (['記憶目錄中有 clues.md 檔案。'], second_msg),
+            ]
+        )
+        agent = _make_agent(provider, tool_registry=registry)
+
+        result = await collect_stream(agent, '查看記憶')
+
+        assert '記憶目錄中有 clues.md 檔案' in result
+
+        # 驗證 tool_result 包含目錄清單
+        tool_results: Any = agent.conversation[2]['content']
+        assert 'clues.md' in tool_results[0]['content']

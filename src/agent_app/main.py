@@ -40,6 +40,7 @@ logger = logging.getLogger(__name__)
 # --- 配置 ---
 STATIC_DIR = 'static'
 SANDBOX_DIR = 'workspace/sandbox'
+MEMORY_DIR = os.environ.get('MEMORY_DIR', 'workspace/memories')
 SESSION_DB_PATH = os.environ.get('SESSION_DB_PATH', 'sessions.db')
 IS_PRODUCTION = os.environ.get('ENV') == 'production'
 
@@ -58,7 +59,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     # 啟動時建立工具註冊表與技能註冊表
     sandbox_root = Path(SANDBOX_DIR)
-    tool_registry = create_default_registry(sandbox_root)
+    memory_dir = Path(MEMORY_DIR)
+    tool_registry = create_default_registry(sandbox_root, memory_dir=memory_dir)
     skill_registry = SkillRegistry()
 
     yield
