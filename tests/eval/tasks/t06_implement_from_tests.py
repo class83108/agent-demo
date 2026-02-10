@@ -10,7 +10,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from agent_core.types import AgentEvent
+from agent_core.types import AgentEvent, MessageParam
 from tests.eval.framework import EvalResult, run_pytest_in_sandbox
 
 TASK_NAME: str = 'T6 - Implement from Tests'
@@ -141,7 +141,11 @@ def setup(sandbox: Path) -> None:
     )
 
 
-def evaluate(sandbox: Path, events: list[AgentEvent]) -> EvalResult:
+def evaluate(
+    sandbox: Path,
+    events: list[AgentEvent],
+    conversation: list[MessageParam],
+) -> EvalResult:
     """評估 filter_by_status 實作結果。"""
     details: dict[str, Any] = {}
 

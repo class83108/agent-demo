@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from agent_core.types import AgentEvent
+from agent_core.types import AgentEvent, MessageParam
 from tests.eval.framework import EvalResult, run_pytest_in_sandbox
 
 TASK_NAME: str = 'T10 - Full Cycle TDD'
@@ -181,7 +181,11 @@ def _run_acceptance_tests(sandbox: Path) -> tuple[bool, str]:
     return len(errors) == 0, '\n'.join(errors) if errors else 'All acceptance tests passed'
 
 
-def evaluate(sandbox: Path, events: list[AgentEvent]) -> EvalResult:
+def evaluate(
+    sandbox: Path,
+    events: list[AgentEvent],
+    conversation: list[MessageParam],
+) -> EvalResult:
     """評估完整 TDD 週期。"""
     details: dict[str, Any] = {}
 

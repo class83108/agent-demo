@@ -22,7 +22,7 @@ import threading
 from pathlib import Path
 from typing import Any
 
-from agent_core.types import AgentEvent
+from agent_core.types import AgentEvent, MessageParam
 from tests.eval.framework import EvalResult
 
 logger = logging.getLogger(__name__)
@@ -156,7 +156,11 @@ def setup(sandbox: Path) -> None:
     logger.info('T11 HTTP 伺服器已啟動', extra={'port': port})
 
 
-def evaluate(sandbox: Path, events: list[AgentEvent]) -> EvalResult:
+def evaluate(
+    sandbox: Path,
+    events: list[AgentEvent],
+    conversation: list[MessageParam],
+) -> EvalResult:
     """評估 Agent 的爬蟲結果。"""
     global _server
 

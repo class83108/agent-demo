@@ -12,7 +12,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
-from agent_core.types import AgentEvent
+from agent_core.types import AgentEvent, MessageParam
 from tests.eval.framework import EvalResult, run_pytest_in_sandbox
 
 TASK_NAME: str = 'T9 - Self-Repair Loop'
@@ -121,7 +121,11 @@ def setup(sandbox: Path) -> None:
     )
 
 
-def evaluate(sandbox: Path, events: list[AgentEvent]) -> EvalResult:
+def evaluate(
+    sandbox: Path,
+    events: list[AgentEvent],
+    conversation: list[MessageParam],
+) -> EvalResult:
     """評估修復結果 — 重點在是否完成完整的 debug 迴圈。"""
     details: dict[str, Any] = {}
 

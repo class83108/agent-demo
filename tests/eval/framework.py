@@ -60,10 +60,13 @@ class EvalResult:
     ran_verification: bool = False
     error: str | None = None
     system_prompt_hash: str = ''
+    conversation: list[MessageParam] = field(default_factory=lambda: [])
 
     def to_dict(self) -> dict[str, Any]:
-        """轉換為可序列化的字典。"""
-        return asdict(self)
+        """轉換為可序列化的字典（不含 conversation，另行儲存）。"""
+        d = asdict(self)
+        d.pop('conversation', None)
+        return d
 
 
 # --- EvalTask Protocol ---
@@ -83,7 +86,12 @@ class EvalTask(Protocol):
         """在 sandbox 中建立任務所需的檔案。"""
         ...
 
-    def evaluate(self, sandbox: Path, events: list[AgentEvent]) -> EvalResult:
+    def evaluate(
+        self,
+        sandbox: Path,
+        events: list[AgentEvent],
+        conversation: list[MessageParam],
+    ) -> EvalResult:
         """評估 Agent 的執行結果。"""
         ...
 
@@ -277,6 +285,11 @@ class EvalRunner:
 
         duration = time.monotonic() - start_time
 
+        # 將 Agent 回覆文字加入 events，供 evaluate 函數存取
+        if response_parts:
+            response_text = ''.join(response_parts)
+            events.append(AgentEvent(type='text', data={'text': response_text}))
+
         # 步驟 4: 收集計量資訊
         tool_call_sequence = [
             e['data']['name']
@@ -294,7 +307,7 @@ class EvalRunner:
         ran_verification = check_ran_tests_from_conversation(agent.conversation)
 
         # 步驟 5: 執行評估
-        eval_result = task_module.evaluate(sandbox, events)
+        eval_result = task_module.evaluate(sandbox, events, agent.conversation)
 
         # 步驟 6: 補充計量欄位
         eval_result.tool_calls = tool_call_count
@@ -303,5 +316,6 @@ class EvalRunner:
         eval_result.duration_seconds = duration
         eval_result.ran_verification = ran_verification
         eval_result.system_prompt_hash = self._prompt_hash
+        eval_result.conversation = agent.conversation
 
         return eval_result

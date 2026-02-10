@@ -68,9 +68,15 @@ class EvalStore:
                 total_tokens INTEGER NOT NULL,
                 duration_seconds REAL NOT NULL,
                 ran_verification INTEGER NOT NULL,
-                error TEXT
+                error TEXT,
+                conversation TEXT
             );
         """)
+        # 遷移：為已存在的 eval_results 資料表新增 conversation 欄位
+        try:
+            self._conn.execute('ALTER TABLE eval_results ADD COLUMN conversation TEXT')
+        except sqlite3.OperationalError:
+            pass  # 欄位已存在
         self._conn.commit()
 
     def create_run(
@@ -110,20 +116,27 @@ class EvalStore:
         )
         return run_id
 
-    def save_result(self, run_id: str, result: dict[str, Any]) -> None:
+    def save_result(
+        self,
+        run_id: str,
+        result: dict[str, Any],
+        conversation: list[Any] | None = None,
+    ) -> None:
         """儲存單一任務的評估結果。
 
         Args:
             run_id: 所屬的 run ID
             result: EvalResult.to_dict() 的輸出
+            conversation: Agent 的完整對話歷史（可選）
         """
+        conv_json = json.dumps(conversation, ensure_ascii=False) if conversation else None
         self._conn.execute(
             """
             INSERT INTO eval_results (run_id, task_name, task_level, passed, score,
                                       details, tool_calls, tool_call_sequence,
                                       total_tokens, duration_seconds,
-                                      ran_verification, error)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                      ran_verification, error, conversation)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 run_id,
@@ -138,6 +151,7 @@ class EvalStore:
                 result['duration_seconds'],
                 int(result['ran_verification']),
                 result.get('error'),
+                conv_json,
             ),
         )
         self._conn.commit()

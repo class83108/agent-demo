@@ -60,11 +60,12 @@ class TestEvalRunner:
             system_prompt=eval_system_prompt,
             timeout_seconds=eval_timeout,
             model=eval_model,
+            enable_memory=True,
         )
         result = await runner.run_task(task_module, sandbox)
 
-        # 存入 SQLite
-        eval_store.save_result(eval_run_id, result.to_dict())
+        # 存入 SQLite（含完整對話歷史）
+        eval_store.save_result(eval_run_id, result.to_dict(), result.conversation)
 
         # Allure 附件
         allure.attach(

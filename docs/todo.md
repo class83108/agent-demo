@@ -87,9 +87,9 @@ API 呼叫失敗（429 rate limit、網路閃斷）很常見，目前一失敗�
 | 多 Provider | 支援 OpenAI、Gemini 等 | Protocol 已設計好，需要時再加 |
 | Cost tracking | 費用追蹤 | `UsageInfo` 已回傳 token 數，加累加器即可 |
 | Guardrails | 輸入輸出過濾 | 可先透過 Skill 的 system prompt 做基本防護 |
-| Memory（agent.md） | 專案知識檔，Agent 啟動時自動載入 | 參考 Claude Code 的 CLAUDE.md pattern，見優化方向 4a |
-| Memory（Working Memory） | 任務內暫存區工具，記錄搜索發現 | 見優化方向 4b |
-| Memory（跨 Session） | SQLite 持久化的結構化記憶 | 等 4a 驗證有效後再做，需先定義「什麼值得記住」 |
+| Memory（agent.md） | 專案知識檔，Agent 啟動時自動載入 | 參考 Claude Code 的 CLAUDE.md pattern |
+| Memory（Working Memory） | 任務內暫存區工具，記錄搜索發現 | ✅ 已實作（memory.py） |
+| Memory（跨 Session） | SQLite 持久化的結構化記憶 | 需先定義「什麼值得記住」 |
 
 ---
 
@@ -99,12 +99,17 @@ v1-baseline 結果：9/10 通過、avg 0.91。詳細優化方向見 `.claude/pla
 
 | 優先級 | 方向 | 目標任務 | 狀態 |
 |--------|------|----------|------|
-| P0 | System Prompt 強化（工作流程 + 工具指引 + 風格一致性 + TDD） | T7/T8/T9/T10 | 待做 |
-| P1 | 工具描述優化（任務導向描述） | T7 | 待做 |
-| P1 | Max Iterations 上限（防止失控迴圈） | 全局 | 待做 |
-| P2 | agent.md 專案知識檔 | T8/T10 | 待做 |
-| P2 | Working Memory 工具 | T7/T9 | 待做 |
-| P3 | 模型選擇策略 A/B 測試 | 全局 | 待做 |
+| P0 | System Prompt 強化（markdown 結構 + 工作流程 + 工具指引 + TDD） | T7/T8/T9/T10 | ✅ |
+| P1 | 工具描述優化（任務導向 / 情境式描述） | T7 | ✅ |
+| P1 | Max Iterations 上限（防止失控迴圈，預設 25） | 全局 | ✅ |
+| P2 | Working Memory 工具（view/write/delete） | T7/T9 | ✅ |
+| P2 | Think 工具（無副作用推理記錄） | 全局 | ✅ |
+| P2 | Web Fetch 工具（httpx + BeautifulSoup，含連結提取） | 全局 | ✅ |
+| P2 | Web Search 工具（Tavily API） | 全局 | ✅ |
+| P2 | T11 Web Crawler Eval（本地 HTTP 爬蟲任務） | 全局 | ✅ |
+| P4 | 工具錯誤訊息增強（引導性建議） | 全局 | 待做 |
+| P4 | 自動驗證提醒（多次 edit 後提示跑 pytest） | 全局 | 待做 |
+| P2 | T12 迷宮探索 Eval（Memory + Compact 壓力測試） | 全局 | ✅ |
 
 ---
 
