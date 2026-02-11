@@ -107,11 +107,11 @@ API 呼叫失敗（429 rate limit、網路閃斷）很常見，目前一失敗�
 - [ ] 子 Agent 預設排除 `create_subagent` 工具（防遞迴）
 - [ ] 子 Agent 有獨立 context，完成後回傳摘要
 
-### 6-2. 分離 feature 與 test
+### 6-2. 分離 feature 與 test ✅
 
-- [ ] `docs/features/` 拆分為 `docs/features/core/` 和 `docs/features/app/`
-- [ ] `tests/` 拆分為 `tests/core/` 和 `tests/app/`
-- [ ] 更新 pytest 設定與 import 路徑
+- [x] `docs/features/` 拆分為 `docs/features/core/` 和 `docs/features/app/`
+- [x] `tests/` 拆分為 `tests/core/` 和 `tests/app/`
+- [x] 更新 pytest 設定與 import 路徑
 
 ### 6-3. agent_core README 與專案架構文件
 

@@ -99,7 +99,9 @@ print(f"處理訊息: {msg_id}")
 
 ### 功能規格文件 (Gherkin)
 
-使用 **Gherkin** 語法撰寫功能規格，檔案放置於 `docs/features/*.feature`。
+使用 **Gherkin** 語法撰寫功能規格，依類型放置：
+- 核心框架功能：`docs/features/core/*.feature`
+- 應用層功能：`docs/features/app/*.feature`
 
 #### 何時建立新的 Feature 檔案
 - **一個 Feature = 一個獨立的業務領域或功能模組**
@@ -203,9 +205,14 @@ agent-demo/
 │       └── main.py      # FastAPI 應用入口
 ├── tests/               # 測試程式
 │   ├── conftest.py
-│   └── test_*.py
+│   ├── core/            # agent_core 單元測試
+│   ├── app/             # agent_app 單元測試
+│   ├── manual/          # Smoke tests（需真實 API）
+│   └── eval/            # Agent 能力評估
 ├── docs/
 │   └── features/        # Gherkin 功能規格 (.feature)
+│       ├── core/        # agent_core 功能規格
+│       └── app/         # agent_app 功能規格
 ├── static/              # 前端靜態檔案
 └── pyproject.toml
 ```
