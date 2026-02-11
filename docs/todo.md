@@ -78,17 +78,79 @@ API 呼叫失敗（429 rate limit、網路閃斷）很常見，目前一失敗�
 
 ---
 
-## 可以晚點做
+## Priority 5: Sandbox 沙箱環境 ✅
+
+### 5-1. Sandbox ABC + LocalSandbox ✅
+
+- [x] 定義 Sandbox ABC（`validate_path` + `exec`）
+- [x] 實作 LocalSandbox：本地路徑驗證與 subprocess 執行
+- [x] 重構 `create_default_registry` 接受 `Sandbox` 參數
+- [x] 更新所有 18 個呼叫端
+- [x] Feature specs 更新：sandbox、container_runner、sandbox_pool
+
+架構決策：
+- Sandbox 只負責路徑驗證與指令執行，檔案 I/O 由 handler 直接操作
+- ContainerRunner 歸應用層（NanoClaw 模式：agent 在 container 內用 LocalSandbox）
+- Agent Swarm 由應用層編排，不在 core framework 範圍
+
+---
+
+## Priority 6: agent_core 完善與發佈
+
+目標：讓 `agent_core` 成為可獨立 `pip install` 的套件。
+
+### 6-1. Subagent 子代理機制
+
+- [ ] 撰寫 Subagent 測試（紅燈）
+- [ ] 實作 `create_subagent` 工具
+- [ ] 子 Agent 使用與父 Agent 相同的 Sandbox
+- [ ] 子 Agent 預設排除 `create_subagent` 工具（防遞迴）
+- [ ] 子 Agent 有獨立 context，完成後回傳摘要
+
+### 6-2. 分離 feature 與 test
+
+- [ ] `docs/features/` 拆分為 `docs/features/core/` 和 `docs/features/app/`
+- [ ] `tests/` 拆分為 `tests/core/` 和 `tests/app/`
+- [ ] 更新 pytest 設定與 import 路徑
+
+### 6-3. agent_core README 與專案架構文件
+
+- [ ] 撰寫 `src/agent_core/README.md`（安裝、快速上手、API 概覽）
+- [ ] 撰寫詳細的專案架構文件（模組關係、擴展點、設計決策）
+
+### 6-4. 發佈為 pip 套件
+
+- [ ] 檢查 `pyproject.toml`，確認 agent_core 的 package 設定
+- [ ] 分離 core / app 的 dependencies
+- [ ] 確認 `pip install` 可正常運作
+- [ ] （可選）發佈到 PyPI 或私有 registry
+
+---
+
+## Priority 7: agent_app 應用層
+
+待 agent_core 發佈後再處理。
+
+### 7-1. ContainerRunner 容器化 Agent
+
+- [ ] 設計 ContainerRunner（容器生命週期、volume mount、網路配置、IPC）
+- [ ] 撰寫測試
+- [ ] 實作 ContainerRunner
+
+### 7-2. RunnerPool（可選 utility）
+
+- [ ] 多租戶場景的 ContainerRunner 生命週期管理
+- [ ] 上限控制、閒置超時回收、工廠函數
+
+### 7-3. 應用層其他功能
 
 | 功能 | 說明 | 備註 |
 |------|------|------|
-| Sub-Agent | 子 agent 隔離執行（compact 摘要、重量級工具調用） | 現有 `Agent` 架構可直接建立獨立實例，用 Haiku 降低成本 |
-| Redis 中繼層 | 串流 buffer + 斷線復原 | SQLite 負責持久化，Redis 做短期快取，客戶端斷線後可從 Redis 補推未送完的 token |
+| Redis 中繼層 | 串流 buffer + 斷線復原 | SQLite 負責持久化，Redis 做短期快取 |
 | 多 Provider | 支援 OpenAI、Gemini 等 | Protocol 已設計好，需要時再加 |
 | Cost tracking | 費用追蹤 | `UsageInfo` 已回傳 token 數，加累加器即可 |
 | Guardrails | 輸入輸出過濾 | 可先透過 Skill 的 system prompt 做基本防護 |
 | Memory（agent.md） | 專案知識檔，Agent 啟動時自動載入 | 參考 Claude Code 的 CLAUDE.md pattern |
-| Memory（Working Memory） | 任務內暫存區工具，記錄搜索發現 | ✅ 已實作（memory.py） |
 | Memory（跨 Session） | SQLite 持久化的結構化記憶 | 需先定義「什麼值得記住」 |
 
 ---
@@ -110,12 +172,3 @@ v1-baseline 結果：9/10 通過、avg 0.91。詳細優化方向見 `.claude/pla
 | P4 | 工具錯誤訊息增強（引導性建議） | 全局 | 待做 |
 | P4 | 自動驗證提醒（多次 edit 後提示跑 pytest） | 全局 | 待做 |
 | P2 | T12 迷宮探索 Eval（Memory + Compact 壓力測試） | 全局 | ✅ |
-
----
-
-## Monorepo 遷移（未來）
-
-- [ ] 建立 uv workspace 結構
-- [ ] `packages/core/` — 框架層（現在的 `src/agent_core`）
-- [ ] `packages/app-*/` — 應用層 packages
-- [ ] 根目錄共享工具鏈設定（ruff、pyright、pre-commit）
