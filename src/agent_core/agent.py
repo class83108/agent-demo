@@ -8,12 +8,14 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time
 from collections.abc import AsyncIterator
 from dataclasses import dataclass, field
 from typing import Any
 
 from agent_core.compact import COMPACT_THRESHOLD, compact_conversation
 from agent_core.config import AgentCoreConfig
+from agent_core.event_store.base import EventStore, StreamEvent
 from agent_core.multimodal import Attachment, build_content_blocks
 from agent_core.providers.base import FinalMessage, LLMProvider
 from agent_core.providers.exceptions import (
@@ -60,6 +62,7 @@ class Agent:
     skill_registry: SkillRegistry | None = None
     usage_monitor: UsageMonitor | None = field(default_factory=UsageMonitor)
     token_counter: TokenCounter | None = field(default_factory=TokenCounter)
+    event_store: EventStore | None = None
 
     def __post_init__(self) -> None:
         """初始化日誌。"""
@@ -315,10 +318,19 @@ class Agent:
             self._handle_stream_interruption(response_parts)
             raise
 
+    async def _append_event(self, stream_id: str, event_type: str, data: str) -> None:
+        """寫入事件到 EventStore（內部輔助方法）。"""
+        assert self.event_store is not None
+        await self.event_store.append(
+            stream_id,
+            StreamEvent(id='', type=event_type, data=data, timestamp=time.time()),
+        )
+
     async def stream_message(
         self,
         content: str,
         attachments: list[Attachment] | None = None,
+        stream_id: str | None = None,
     ) -> AsyncIterator[str | AgentEvent]:
         """以串流方式發送訊息並逐步取得回應。
 
@@ -326,9 +338,13 @@ class Agent:
         自動執行工具並將結果回傳，直到取得最終文字回應。
         支援多模態輸入（圖片、PDF）。
 
+        若配置了 event_store 且傳入 stream_id，串流過程中的每個事件
+        會自動寫入 EventStore，供客戶端斷線後從 offset 恢復。
+
         Args:
             content: 使用者文字訊息內容
             attachments: 附件列表（圖片或 PDF，可選）
+            stream_id: 串流識別符（通常為 session_id），搭配 event_store 使用
 
         Yields:
             str: 回應的每個 token
@@ -352,6 +368,31 @@ class Agent:
         self.conversation.append({'role': 'user', 'content': message_content})
         logger.debug('收到使用者訊息 (串流模式)', extra={'content_length': len(content)})
 
+        # 判斷是否啟用 EventStore 寫入
+        should_store = self.event_store is not None and stream_id is not None
+
         # 執行串流迴圈（包含工具調用處理）
-        async for token in self._stream_with_tool_loop():
-            yield token
+        try:
+            async for chunk in self._stream_with_tool_loop():
+                if should_store and stream_id is not None:
+                    if isinstance(chunk, str):
+                        await self._append_event(stream_id, 'token', chunk)
+                    else:
+                        await self._append_event(
+                            stream_id,
+                            chunk['type'],
+                            json.dumps(chunk['data'], ensure_ascii=False),
+                        )
+                yield chunk
+
+            # 串流正常完成
+            if should_store and stream_id is not None:
+                await self._append_event(stream_id, 'done', '')
+                await self.event_store.mark_complete(stream_id)  # type: ignore[union-attr]
+                logger.debug('EventStore 串流標記完成', extra={'stream_id': stream_id})
+
+        except Exception:
+            if should_store and stream_id is not None:
+                await self.event_store.mark_failed(stream_id)  # type: ignore[union-attr]
+                logger.debug('EventStore 串流標記失敗', extra={'stream_id': stream_id})
+            raise
