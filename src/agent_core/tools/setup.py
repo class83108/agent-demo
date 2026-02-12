@@ -535,12 +535,10 @@ def _register_web_fetch(registry: ToolRegistry, allowed_hosts: list[str]) -> Non
 
     async def _handler(
         url: str,
-        timeout: int = 30,
         max_size: int = 1_000_000,
     ) -> dict[str, Any]:
         return await web_fetch_handler(
             url=url,
-            timeout=timeout,
             max_size=max_size,
             allowed_hosts=allowed_hosts,
         )
@@ -563,10 +561,6 @@ def _register_web_fetch(registry: ToolRegistry, allowed_hosts: list[str]) -> Non
                 'url': {
                     'type': 'string',
                     'description': '要擷取的網頁 URL（http 或 https）',
-                },
-                'timeout': {
-                    'type': 'integer',
-                    'description': '超時秒數（預設 30）',
                 },
             },
             'required': ['url'],

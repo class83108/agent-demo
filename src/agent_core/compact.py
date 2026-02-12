@@ -188,7 +188,6 @@ def _format_messages_for_summary(messages: list[MessageParam]) -> str:
 async def summarize_conversation(
     conversation: list[MessageParam],
     provider: LLMProvider,
-    system_prompt: str,
     keep_last_n: int = 4,
 ) -> str | None:
     """Phase 2: 用 LLM 摘要早期對話。
@@ -199,7 +198,6 @@ async def summarize_conversation(
     Args:
         conversation: 對話歷史（會被原地修改）
         provider: LLM Provider（需支援 create 方法）
-        system_prompt: 原始 system prompt（供摘要 context 參考）
         keep_last_n: 保留最後幾則訊息
 
     Returns:
@@ -264,7 +262,6 @@ async def summarize_conversation(
 async def compact_conversation(
     conversation: list[MessageParam],
     provider: LLMProvider,
-    system_prompt: str,
     token_counter: TokenCounter,
 ) -> CompactResult:
     """完整 compact 流程。
@@ -275,7 +272,6 @@ async def compact_conversation(
     Args:
         conversation: 對話歷史（會被原地修改）
         provider: LLM Provider
-        system_prompt: 系統提示詞
         token_counter: Token 計數器
 
     Returns:
@@ -311,7 +307,6 @@ async def compact_conversation(
     summary = await summarize_conversation(
         conversation=conversation,
         provider=provider,
-        system_prompt=system_prompt,
     )
 
     if summary is not None:

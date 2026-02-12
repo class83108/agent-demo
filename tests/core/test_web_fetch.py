@@ -259,7 +259,7 @@ class TestWebFetchIntegration:
     async def test_fetch_connection_error(self) -> None:
         result = await web_fetch_handler(
             url='http://192.0.2.1:1',  # TEST-NET，不會有服務
-            timeout=2,
+            timeout_seconds=2,
             allowed_hosts=['192.0.2.1'],
         )
         assert 'error' in result

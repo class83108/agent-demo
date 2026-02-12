@@ -6,13 +6,14 @@
 
 from __future__ import annotations
 
+import asyncio
 import ipaddress
 import logging
 from typing import Any
 from urllib.parse import urljoin, urlparse
 
 import httpx
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Tag
 
 logger = logging.getLogger(__name__)
 
@@ -79,6 +80,37 @@ def validate_url(
     return url
 
 
+def _extract_links(soup: BeautifulSoup, base_url: str) -> list[dict[str, str]]:
+    """從 HTML 中提取連結。"""
+    links: list[dict[str, str]] = []
+    for a_tag in soup.find_all('a', href=True):
+        assert isinstance(a_tag, Tag)
+        href = str(a_tag['href'])
+        if base_url and not urlparse(href).scheme:
+            href = urljoin(base_url, href)
+        link_text = a_tag.get_text(strip=True)
+        if link_text and href:
+            links.append({'text': link_text, 'href': href})
+    return links
+
+
+def _collapse_blank_lines(text: str) -> str:
+    """合併連續空行為單一空行。"""
+    lines = text.split('\n')
+    result_lines: list[str] = []
+    prev_empty = False
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            if not prev_empty:
+                result_lines.append('')
+            prev_empty = True
+        else:
+            result_lines.append(stripped)
+            prev_empty = False
+    return '\n'.join(result_lines).strip()
+
+
 def extract_text(html: str, base_url: str = '') -> tuple[str, str, list[dict[str, str]]]:
     """將 HTML 轉換為可讀純文字，同時提取連結。
 
@@ -101,39 +133,18 @@ def extract_text(html: str, base_url: str = '') -> tuple[str, str, list[dict[str
         tag.decompose()
 
     # 提取連結（在轉換為純文字之前）
-    links: list[dict[str, str]] = []
-    for a_tag in soup.find_all('a', href=True):
-        href = str(a_tag['href'])
-        if base_url and not urlparse(href).scheme:
-            href = urljoin(base_url, href)
-        link_text = a_tag.get_text(strip=True)
-        if link_text and href:
-            links.append({'text': link_text, 'href': href})
+    links = _extract_links(soup, base_url)
 
-    # 提取純文字（separator 確保 block 元素間有換行）
+    # 提取純文字並合併連續空行
     text = soup.get_text(separator='\n', strip=True)
+    clean_text = _collapse_blank_lines(text)
 
-    # 合併連續空行
-    lines = text.split('\n')
-    result_lines: list[str] = []
-    prev_empty = False
-    for line in lines:
-        stripped = line.strip()
-        if not stripped:
-            if not prev_empty:
-                result_lines.append('')
-            prev_empty = True
-        else:
-            result_lines.append(stripped)
-            prev_empty = False
-
-    clean_text = '\n'.join(result_lines).strip()
     return clean_text, title, links
 
 
 async def web_fetch_handler(
     url: str,
-    timeout: int = DEFAULT_TIMEOUT_SECONDS,
+    timeout_seconds: float = DEFAULT_TIMEOUT_SECONDS,
     max_size: int = MAX_RESPONSE_SIZE,
     allowed_hosts: list[str] | None = None,
 ) -> dict[str, Any]:
@@ -141,7 +152,7 @@ async def web_fetch_handler(
 
     Args:
         url: 要擷取的網頁 URL
-        timeout: 超時秒數（預設 30）
+        timeout_seconds: 超時秒數（預設 30）
         max_size: 最大回應大小（bytes，預設 1MB）
         allowed_hosts: 允許的主機清單（覆蓋預設封鎖）
 
@@ -156,41 +167,39 @@ async def web_fetch_handler(
     logger.info('擷取網頁', extra={'url': validated_url})
 
     try:
-        async with httpx.AsyncClient(
-            timeout=httpx.Timeout(timeout),
-            follow_redirects=True,
-        ) as client:
-            response = await client.get(validated_url)
+        async with asyncio.timeout(timeout_seconds):
+            async with httpx.AsyncClient(follow_redirects=True) as client:
+                response = await client.get(validated_url)
 
-            content_length = len(response.content)
-            if content_length > max_size:
+                content_length = len(response.content)
+                if content_length > max_size:
+                    return {
+                        'error': f'回應過大: {content_length} bytes（上限 {max_size}）',
+                        'url': validated_url,
+                        'status_code': response.status_code,
+                    }
+
+                content_type = response.headers.get('content-type', '')
+                raw_text = response.text
+
+                if 'text/html' in content_type or '<html' in raw_text[:500].lower():
+                    content_text, title, links = extract_text(raw_text, validated_url)
+                else:
+                    content_text = raw_text
+                    title = ''
+                    links = []
+
                 return {
-                    'error': f'回應過大: {content_length} bytes（上限 {max_size}）',
                     'url': validated_url,
                     'status_code': response.status_code,
+                    'title': title,
+                    'content_text': content_text,
+                    'content_length': len(content_text),
+                    'links': links,
                 }
 
-            content_type = response.headers.get('content-type', '')
-            raw_text = response.text
-
-            if 'text/html' in content_type or '<html' in raw_text[:500].lower():
-                content_text, title, links = extract_text(raw_text, validated_url)
-            else:
-                content_text = raw_text
-                title = ''
-                links = []
-
-            return {
-                'url': validated_url,
-                'status_code': response.status_code,
-                'title': title,
-                'content_text': content_text,
-                'content_length': len(content_text),
-                'links': links,
-            }
-
-    except httpx.TimeoutException:
-        return {'error': f'請求超時（{timeout} 秒）', 'url': validated_url}
+    except TimeoutError:
+        return {'error': f'請求超時（{timeout_seconds} 秒）', 'url': validated_url}
     except httpx.ConnectError as e:
         return {'error': f'連線失敗: {e}', 'url': validated_url}
     except httpx.HTTPError as e:

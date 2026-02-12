@@ -164,7 +164,6 @@ class Agent:
         result = await compact_conversation(
             conversation=self.conversation,
             provider=self.provider,
-            system_prompt=self._get_system_prompt(),
             token_counter=self.token_counter,
         )
 
@@ -181,6 +180,12 @@ class Agent:
     def _has_tool_calls(self, final_message: FinalMessage) -> bool:
         """判斷回應是否包含工具調用。"""
         return final_message.stop_reason == 'tool_use' and self.tool_registry is not None
+
+    def _get_tool_definitions(self) -> list[dict[str, Any]] | None:
+        """取得工具定義列表。"""
+        if self.tool_registry:
+            return self.tool_registry.get_tool_definitions()
+        return None
 
     def _handle_stream_interruption(self, response_parts: list[str]) -> None:
         """處理串流中斷時的回應保留邏輯。"""
@@ -265,7 +270,7 @@ class Agent:
                     yield AgentEvent(type='compact', data=dict(compact_result))
 
                 system = self._get_system_prompt()
-                tools = self.tool_registry.get_tool_definitions() if self.tool_registry else None
+                tools = self._get_tool_definitions()
 
                 async with self.provider.stream(
                     messages=self.conversation,
@@ -326,6 +331,29 @@ class Agent:
             StreamEvent(id='', type=event_type, data=data, timestamp=time.time()),
         )
 
+    async def _store_stream_chunk(self, stream_id: str, chunk: str | AgentEvent) -> None:
+        """將串流事件寫入 EventStore。"""
+        if isinstance(chunk, str):
+            await self._append_event(stream_id, 'token', chunk)
+        else:
+            await self._append_event(
+                stream_id,
+                chunk['type'],
+                json.dumps(chunk['data'], ensure_ascii=False),
+            )
+
+    async def _finalize_stream(self, stream_id: str | None, success: bool) -> None:
+        """完成或標記失敗串流。"""
+        if stream_id is None or self.event_store is None:
+            return
+        if success:
+            await self._append_event(stream_id, 'done', '')
+            await self.event_store.mark_complete(stream_id)
+            logger.debug('EventStore 串流標記完成', extra={'stream_id': stream_id})
+        else:
+            await self.event_store.mark_failed(stream_id)
+            logger.debug('EventStore 串流標記失敗', extra={'stream_id': stream_id})
+
     async def stream_message(
         self,
         content: str,
@@ -369,30 +397,19 @@ class Agent:
         logger.debug('收到使用者訊息 (串流模式)', extra={'content_length': len(content)})
 
         # 判斷是否啟用 EventStore 寫入
-        should_store = self.event_store is not None and stream_id is not None
+        active_stream_id = (
+            stream_id if self.event_store is not None and stream_id is not None else None
+        )
 
         # 執行串流迴圈（包含工具調用處理）
         try:
             async for chunk in self._stream_with_tool_loop():
-                if should_store and stream_id is not None:
-                    if isinstance(chunk, str):
-                        await self._append_event(stream_id, 'token', chunk)
-                    else:
-                        await self._append_event(
-                            stream_id,
-                            chunk['type'],
-                            json.dumps(chunk['data'], ensure_ascii=False),
-                        )
+                if active_stream_id is not None:
+                    await self._store_stream_chunk(active_stream_id, chunk)
                 yield chunk
 
-            # 串流正常完成
-            if should_store and stream_id is not None:
-                await self._append_event(stream_id, 'done', '')
-                await self.event_store.mark_complete(stream_id)  # type: ignore[union-attr]
-                logger.debug('EventStore 串流標記完成', extra={'stream_id': stream_id})
+            await self._finalize_stream(active_stream_id, success=True)
 
         except Exception:
-            if should_store and stream_id is not None:
-                await self.event_store.mark_failed(stream_id)  # type: ignore[union-attr]
-                logger.debug('EventStore 串流標記失敗', extra={'stream_id': stream_id})
+            await self._finalize_stream(active_stream_id, success=False)
             raise

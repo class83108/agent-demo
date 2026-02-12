@@ -193,7 +193,6 @@ class TestSummarizeConversation:
         summary = await summarize_conversation(
             conversation=conversation,
             provider=mock_provider,
-            system_prompt='你是助手',
             keep_last_n=4,
         )
 
@@ -230,7 +229,6 @@ class TestSummarizeConversation:
         await summarize_conversation(
             conversation=conversation,
             provider=mock_provider,
-            system_prompt='你是助手',
             keep_last_n=2,
         )
 
@@ -251,7 +249,6 @@ class TestSummarizeConversation:
         summary = await summarize_conversation(
             conversation=conversation,
             provider=mock_provider,
-            system_prompt='你是助手',
             keep_last_n=4,
         )
 
@@ -283,7 +280,6 @@ class TestSummarizeConversation:
         await summarize_conversation(
             conversation=conversation,
             provider=mock_provider,
-            system_prompt='你是助手',
             keep_last_n=2,
         )
 
@@ -317,7 +313,6 @@ class TestCompactConversation:
         result = await compact_conversation(
             conversation=conversation,
             provider=mock_provider,
-            system_prompt='你是助手',
             token_counter=token_counter,
         )
 
@@ -353,7 +348,6 @@ class TestCompactConversation:
         result = await compact_conversation(
             conversation=conversation,
             provider=mock_provider,
-            system_prompt='你是助手',
             token_counter=token_counter,
         )
 
@@ -375,7 +369,6 @@ class TestCompactConversation:
         result = await compact_conversation(
             conversation=conversation,
             provider=mock_provider,
-            system_prompt='你是助手',
             token_counter=token_counter,
         )
 
